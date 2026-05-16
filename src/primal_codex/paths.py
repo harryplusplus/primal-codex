@@ -39,14 +39,11 @@ def resolve_codex_config_path() -> Path:
     """Resolve the config path for Codex.
 
     Respects the ``CODEX_HOME`` environment variable. Falls back to
-    ``~/.codex/config.toml`` when the variable is unset. Creates the parent
-    directory if it does not exist.
+    ``~/.codex/config.toml`` when the variable is unset.
 
     Returns:
         Absolute ``Path`` to the Codex config file.
 
     """
     env = os.environ.get(CODEX_HOME_ENV_KEY, "")
-    p = (Path(env) if env else CODEX_HOME_DEFAULT) / CONFIG_FILENAME
-    p.parent.mkdir(parents=True, exist_ok=True)
-    return p
+    return (Path(env) if env else CODEX_HOME_DEFAULT) / CONFIG_FILENAME

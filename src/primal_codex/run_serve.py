@@ -59,7 +59,7 @@ class ActiveRelays:
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application startup and shutdown lifecycle."""
-    # Startup: initialise shared state.
+    # Startup: initialize shared state.
     _app.state.relays = ActiveRelays()
     yield
     # Shutdown: wait for in-flight SSE relays before closing outbound clients.
