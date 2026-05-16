@@ -19,17 +19,14 @@ def resolve_primal_codex_config_path() -> Path:
     """Resolve the config path for Primal Codex.
 
     Respects the ``PRIMAL_CODEX_HOME`` environment variable. Falls back to
-    ``~/.primal-codex/config.toml`` when the variable is unset. Creates the
-    parent directory if it does not exist.
+    ``~/.primal-codex/config.toml`` when the variable is unset.
 
     Returns:
         Absolute ``Path`` to the Primal Codex config file.
 
     """
     env = os.environ.get(PRIMAL_CODEX_HOME_ENV_KEY, "")
-    p = (Path(env) if env else PRIMAL_CODEX_HOME_DEFAULT) / CONFIG_FILENAME
-    p.parent.mkdir(parents=True, exist_ok=True)
-    return p
+    return (Path(env) if env else PRIMAL_CODEX_HOME_DEFAULT) / CONFIG_FILENAME
 
 
 CODEX_HOME_DIR = ".codex"

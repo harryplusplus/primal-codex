@@ -10,9 +10,27 @@ from primal_codex.paths import (
     PRIMAL_CODEX_HOME_ENV_KEY,
 )
 from primal_codex.run_codex import run_codex
+from primal_codex.run_init import run_init
 from primal_codex.run_serve import run_serve
 
 app = typer.Typer(no_args_is_help=True, rich_markup_mode="markdown")
+
+
+@app.command(
+    help=f"""Create the default Primal Codex config file if it does not exist.
+
+Writes a fresh ``{CONFIG_FILENAME}`` to
+``${{{PRIMAL_CODEX_HOME_ENV_KEY}}}/{CONFIG_FILENAME}``
+(default ``{PRIMAL_CODEX_HOME_DISPLAY}/{CONFIG_FILENAME}``).
+An existing file is never overwritten.
+
+### Environment Variables
+- **`{PRIMAL_CODEX_HOME_ENV_KEY}`** *(optional)* — Path to the Primal Codex home directory.
+  Defaults to ``{PRIMAL_CODEX_HOME_DISPLAY}`` if unset."""  # noqa: E501
+)
+def init() -> None:
+    """Create the default Primal Codex config file if it does not exist."""
+    run_init()
 
 
 @app.command(

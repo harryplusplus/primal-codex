@@ -9,8 +9,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-HOST = "0.0.0.0"  # noqa: S104
-PORT = 8011
+from primal_codex.config import load_config
 
 
 class ActiveRelays:
@@ -70,8 +69,8 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(lifespan=lifespan)
 
 
-@app.get("/health")
-async def health() -> JSONResponse:
+@app.get("/healthz")
+async def healthz() -> JSONResponse:
     """Health check endpoint."""
     return JSONResponse({"status": "ok"})
 
@@ -126,15 +125,19 @@ async def chat_completions(request: Request) -> JSONResponse | StreamingResponse
 def run_serve() -> None:
     """Start the FastAPI server with graceful shutdown on SIGINT/SIGTERM.
 
+    Reads ``host`` and ``port`` from ``~/.primal-codex/config.toml``
+    (``[server]`` section).  Falls back to ``127.0.0.1:8010`` when the
+    config is absent or missing those keys.
+
     Uvicorn internally handles ``SIGINT`` and ``SIGTERM`` by draining active
     HTTP connections before exiting.  The lifespan context manager additionally
     waits for in-flight OpenAI SSE relays and closes the outbound HTTP client.
     """
-    config = uvicorn.Config(
+    cfg = load_config()
+    uvicorn_config = uvicorn.Config(
         app,
-        host=HOST,
-        port=PORT,
-        lifespan="on",
+        host=cfg.server.host,
+        port=cfg.server.port,
     )
-    server = uvicorn.Server(config)
+    server = uvicorn.Server(uvicorn_config)
     server.run()
