@@ -11,15 +11,19 @@ app = typer.Typer(no_args_is_help=True, rich_markup_mode="markdown")
 # Path conventions shared across help texts.
 _PRIMAL_CODEX_HOME = "PRIMAL_CODEX_HOME"
 _PRIMAL_CODEX_HOME_DEFAULT = "~/.primal-codex"
+_PRIMAL_CODEX_CONFIG = f"${{{_PRIMAL_CODEX_HOME}}}/config.toml"
+_PRIMAL_CODEX_CONFIG_DEFAULT = f"{_PRIMAL_CODEX_HOME_DEFAULT}/config.toml"
 _CODEX_HOME = "CODEX_HOME"
 _CODEX_HOME_DEFAULT = "~/.codex"
+_CODEX_CONFIG = f"${{{_CODEX_HOME}}}/config.toml"
+_CODEX_CONFIG_DEFAULT = f"{_CODEX_HOME_DEFAULT}/config.toml"
 
 
 @app.command(
     help=f"""Update Codex configuration based on Primal Codex settings.
 
-Reads settings from `${_PRIMAL_CODEX_HOME}/config.toml` (default `{_PRIMAL_CODEX_HOME_DEFAULT}/config.toml`)  
-and partially updates `${_CODEX_HOME}/config.toml` (default `{_CODEX_HOME_DEFAULT}/config.toml`).  
+Reads settings from `{_PRIMAL_CODEX_CONFIG}` (default `{_PRIMAL_CODEX_CONFIG_DEFAULT}`)  
+and partially updates `{_CODEX_CONFIG}` (default `{_CODEX_CONFIG_DEFAULT}`).  
 A backup of any existing target file is saved as `<path>.bak`.
 
 ### Environment Variables
@@ -34,7 +38,7 @@ def codex() -> None:
 @app.command(
     help=f"""Start the Primal Codex API server.
 
-Reads settings from `${_PRIMAL_CODEX_HOME}/config.toml` (default `{_PRIMAL_CODEX_HOME_DEFAULT}/config.toml`)  
+Reads settings from `{_PRIMAL_CODEX_CONFIG}` (default `{_PRIMAL_CODEX_CONFIG_DEFAULT}`)  
 to configure the server.
 
 ### Environment Variables
