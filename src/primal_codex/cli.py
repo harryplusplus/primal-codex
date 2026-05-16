@@ -9,15 +9,18 @@ from primal_codex.run_codex import run_codex
 app = typer.Typer(no_args_is_help=True, rich_markup_mode="markdown")
 
 
+PRIMAL_CODEX_HOME_HELP = """- **`PRIMAL_CODEX_HOME`** *(optional)* - Path to the Primal Codex home directory. Defaults to `~/.primal-codex` if unset."""  # noqa: E501
+
+
 @app.command(
-    help="""Update the `model_provider` configuration in the Codex config file.
+    help=f"""Update the `model_provider` configuration in the Codex config file.
 
 The file is located at `$CODEX_HOME/config.toml` (fallback `~/.codex/config.toml`).  
 A backup of any existing file is saved as `<path>.bak`.
 
 ### Environment Variables
-- **`CODEX_HOME`** *(optional)* — Path to the Codex home directory.
-  Defaults to `~/.codex` if unset."""  # noqa: W291
+- **`CODEX_HOME`** *(optional)* — Path to the Codex home directory. Defaults to `~/.codex` if unset.
+{PRIMAL_CODEX_HOME_HELP}"""  # noqa: E501, W291
 )
 def codex() -> None:
     """Update the Codex model_provider configuration."""
