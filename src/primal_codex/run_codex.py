@@ -48,11 +48,8 @@ def run_codex() -> None:
 
     # 2. Read the existing Codex config (if any).
     codex_path = resolve_codex_config_path()
-    if codex_path.exists():
-        raw = codex_path.read_text(encoding="utf-8")
-        doc = tomlkit.parse(raw)
-    else:
-        doc = tomlkit.parse("")
+    raw = codex_path.read_text(encoding="utf-8") if codex_path.exists() else ""
+    doc = tomlkit.parse(raw)
 
     # 3. Detect required changes.
     changed = False
