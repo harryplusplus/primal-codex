@@ -8,13 +8,7 @@ from primal_codex.run_codex import run_codex
 
 app = typer.Typer(no_args_is_help=True, rich_markup_mode="markdown")
 
-# ---------------------------------------------------------------------------
 # Path conventions shared across help texts.
-#
-# These constants capture the env-var names, default directories, and full
-# config-file paths so that every command help uses exactly the same spelling
-# for the same contract.
-# ---------------------------------------------------------------------------
 
 # Primal Codex home
 _PRIMAL_CODEX_HOME = "PRIMAL_CODEX_HOME"
