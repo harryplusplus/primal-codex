@@ -20,6 +20,22 @@ from primal_codex.paths import resolve_codex_config_path
 PRIMAL_CODEX_PROVIDER_ID = "primal-codex"
 
 
+def _get_toml_value(doc: dict, key: str) -> object:
+    """Walk a dotted key path (e.g. ``"a.b.c"``) into a tomlkit document."""
+    parts = key.split(".")
+    current: object = doc
+    try:
+        for part in parts:
+            if isinstance(current, dict):
+                current = current[part]
+            else:
+                return None
+    except (KeyError, TypeError):
+        return None
+    else:
+        return current
+
+
 def run_codex() -> None:
     """Update Codex configuration based on Primal Codex settings.
 
@@ -38,43 +54,37 @@ def run_codex() -> None:
     else:
         doc = tomlkit.parse("")
 
-    # 3. Compare desired vs. current values.
+    # 3. Remove model_catalog_json if present — Primal Codex manages models
+    #    dynamically via its own endpoints; a static catalog would interfere.
+    removed_catalog = False
+    if doc.get("model_catalog_json") is not None:
+        del doc["model_catalog_json"]
+        removed_catalog = True
+        typer.echo(
+            "  Removed model_catalog_json (Primal Codex manages models dynamically)"
+        )
+
+    # 4. Detect required changes.
     desired = {
         "model_provider": PRIMAL_CODEX_PROVIDER_ID,
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name": PRIMAL_CODEX_PROVIDER_ID,
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url": server_url,
     }
+    changes: dict[str, str] = {
+        k: v for k, v in desired.items() if _get_toml_value(doc, k) != v
+    }
 
-    changes: dict[str, str] = {}
-    for key, value in desired.items():
-        # Walk the dotted path to read the current value.
-        parts = key.split(".")
-        current: object = doc
-        try:
-            for part in parts:
-                if isinstance(current, dict):
-                    current = current[part]
-                else:
-                    current = None
-                    break
-        except (KeyError, TypeError):
-            current = None
-
-        if current != value:
-            changes[key] = value
-
-    if not changes:
+    if not changes and not removed_catalog:
         typer.echo(f"Codex config is already up to date at {codex_path}")
         return
 
-    # 4. Backup the existing file (only when it already exists).
-    bak_path: str | None = None
+    # 5. Backup the existing file (only when it already exists).
     if codex_path.exists():
         bak_path = str(codex_path) + ".bak"
         shutil.copy2(codex_path, bak_path)
         typer.echo(f"Backed up existing config to {bak_path}")
 
-    # 5. Apply changes with tomlkit (preserves formatting of untouched sections).
+    # 6. Apply changes with tomlkit (preserves formatting of untouched sections).
     doc["model_provider"] = PRIMAL_CODEX_PROVIDER_ID
     providers = doc.setdefault("model_providers", {})
     entry = providers.setdefault(PRIMAL_CODEX_PROVIDER_ID, {})
@@ -84,7 +94,7 @@ def run_codex() -> None:
     codex_path.parent.mkdir(parents=True, exist_ok=True)
     codex_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
 
-    # 6. Report results.
+    # 7. Report results.
     typer.echo(f"Updated Codex config at {codex_path}")
     for key, value in changes.items():
         typer.echo(f"  Set {key} = {value!r}")
