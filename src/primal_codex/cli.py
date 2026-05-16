@@ -1,10 +1,9 @@
 """Primal Codex CLI."""
 
-import os
-
 import typer
 
 from primal_codex.run_codex import run_codex
+from primal_codex.run_serve import run_serve
 
 app = typer.Typer(no_args_is_help=True, rich_markup_mode="markdown")
 
@@ -37,7 +36,7 @@ A backup of any existing target file is saved as `<path>.bak`.
 )
 def codex() -> None:
     """Update the Codex model_provider configuration."""
-    run_codex(os.environ.get("CODEX_HOME", ""))
+    run_codex()
 
 
 @app.command(
@@ -52,6 +51,7 @@ Reads settings from `{_PRIMAL_CODEX_CONFIG}`
 )
 def serve() -> None:
     """Start the Primal Codex API server."""
+    run_serve()
 
 
 def main() -> None:

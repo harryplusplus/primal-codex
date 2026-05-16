@@ -24,3 +24,6 @@ ignore = [
     # See https://docs.astral.sh/ruff/rules/missing-trailing-comma/
     "COM812",
 ]
+
+[tool.pyrefly]
+project-includes = ["src/**/*.py"]
