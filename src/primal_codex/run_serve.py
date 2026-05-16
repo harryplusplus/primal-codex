@@ -1,4 +1,4 @@
-"""FastAPI server for Primal Codex with HTTP and SSE support."""
+"""FastAPI server for Primal Codex."""
 
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
@@ -9,31 +9,19 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from primal_codex.config import load_config
-from primal_codex.list_models import ModelsResponse, list_models
+from primal_codex.config import PrimalCodexConfig, load_config
+from primal_codex.models import ModelInfo, ModelsResponse
 
 
 class ActiveRelays:
-    """Track in-flight SSE relay streams for graceful shutdown.
-
-    Wraps an async generator so that the ASGI streaming Task is captured
-    via ``asyncio.current_task()`` and automatically removed from the
-    pending set when the task finishes (``add_done_callback``).
-    Lifespan shutdown awaits all tracked tasks before closing outbound
-    clients.
-    """
+    """Track in-flight SSE relay streams for graceful shutdown."""
 
     def __init__(self) -> None:
         """Initialize an empty relay tracker."""
         self._tasks: set[asyncio.Task[Any]] = set()
 
     def wrap(self, gen: AsyncIterator[str]) -> AsyncIterator[str]:
-        """Wrap an async generator so its ASGI task lifecycle is tracked.
-
-        The returned iterator behaves identically to ``gen``, but the
-        ASGI streaming task is registered with the tracker on first
-        iteration and auto-removed via ``add_done_callback``.
-        """
+        """Wrap a generator so its ASGI task lifecycle is tracked."""
         it = gen.__aiter__()
 
         async def _wrapped() -> AsyncIterator[str]:
@@ -47,7 +35,7 @@ class ActiveRelays:
         return _wrapped()
 
     async def wait_all(self) -> None:
-        """Block until all active relays finish, with a 30-second timeout."""
+        """Wait for all active relays with a 30-second timeout."""
         if not self._tasks:
             return
         try:
@@ -57,13 +45,30 @@ class ActiveRelays:
             pass
 
 
+def _to_flat_models(config: PrimalCodexConfig) -> list[ModelInfo]:
+    """Flatten ``providers.*.models.*`` into a flat list sorted by priority."""
+    infos: list[ModelInfo] = []
+    for provider in config.providers.values():
+        infos.extend(provider.models.values())
+    infos.sort(key=lambda m: m.priority, reverse=True)
+    return infos
+
+
+def _lookup_model(config: PrimalCodexConfig, slug: str) -> ModelInfo | None:
+    """Look up a model by its qualified slug."""
+    for provider in config.providers.values():
+        for mi in provider.models.values():
+            if mi.slug == slug:
+                return mi
+    return None
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
-    """Manage application startup and shutdown lifecycle."""
-    # Startup: initialize shared state.
+    """Load config once on startup; drain relays on shutdown."""
+    _app.state.primal_config = load_config()
     _app.state.relays = ActiveRelays()
     yield
-    # Shutdown: wait for in-flight SSE relays before closing outbound clients.
     await _app.state.relays.wait_all()
 
 
@@ -83,77 +88,66 @@ async def healthz() -> JSONResponse:
         "Return metadata for all models discovered from configured providers."
     ),
     tags=["models"],
-    response_description="A list of available models and their metadata.",
 )
-def models() -> ModelsResponse:
-    """List all available models with their metadata.
-
-    Reads model definitions from ``[providers.*.models.*]`` in the
-    Primal Codex TOML configuration and returns them sorted by
-    ``priority``, highest first.
-    """
-    return list_models(load_config())
+def models(request: Request) -> JSONResponse:
+    """List all models — reads from cached config, omits unset fields."""
+    config: PrimalCodexConfig = request.app.state.primal_config
+    return JSONResponse(
+        ModelsResponse(models=_to_flat_models(config)).model_dump(exclude_none=True)
+    )
 
 
-@app.post("/chat/completions", response_model=None)
-async def chat_completions(request: Request) -> JSONResponse | StreamingResponse:
-    """Chat Completions API — relays OpenAI streaming responses as SSE.
-
-    * Non-streaming (``stream=False``): returns a standard JSON response.
-    * Streaming (``stream=True``): returns ``text/event-stream`` (SSE).
-
-    Active SSE relays are tracked via ``ActiveRelays`` so that the lifespan
-    shutdown waits for all in-flight relays before closing the outbound HTTP
-    client.
-    """
+@app.post("/responses", response_model=None)
+async def responses(
+    request: Request,
+) -> JSONResponse | StreamingResponse:
+    """Relay upstream responses as JSON or SSE."""
     body = await request.json()
     stream = body.get("stream", False)
 
+    # NOTE: placeholder; replace with actual upstream relay
+    #   https://github.com/primal-codex/primal-codex/issues/1
+    _ = body  # use body.get("model") for model lookup
     if stream:
         relays: ActiveRelays = request.app.state.relays
 
         async def _relay_stream() -> AsyncIterator[str]:
-            """Relay OpenAI streaming chunks to the client as SSE.
-
-            TODO(@primal-codex): Replace placeholder with actual OpenAI call.
-            """
-            # Placeholder: emit a single chunk then signal completion.
+            """Relay upstream streaming chunks as SSE."""
             yield (
                 "data: {"
-                '"id":"chatcmpl-xxx",'
-                '"object":"chat.completion.chunk",'
-                '"choices":[{"delta":{"content":"Hello"}}]'
+                '"id":"resp_xxx",'
+                '"object":"response",'
+                '"status":"completed",'
+                '"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello","annotations":[]}]}]'
                 "}\n\n"
             )
-            yield "data: [DONE]\n\n"
 
         return StreamingResponse(
             relays.wrap(_relay_stream()),
             media_type="text/event-stream",
         )
 
-    # Non-streaming response.
     return JSONResponse(
         {
-            "id": "chatcmpl-xxx",
-            "object": "chat.completion",
-            "choices": [{"message": {"role": "assistant", "content": "Hello"}}],
-        },
+            "id": "resp_xxx",
+            "object": "response",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        {"type": "output_text", "text": "Hello", "annotations": []}
+                    ],
+                }
+            ],
+        }
     )
 
 
 def run_serve() -> None:
-    """Start the FastAPI server with graceful shutdown on SIGINT/SIGTERM.
-
-    Reads ``host`` and ``port`` from ``~/.primal-codex/config.toml``
-    (``[server]`` section).  Falls back to ``127.0.0.1:8010`` when the
-    config is absent or missing those keys.
-
-    Uvicorn internally handles ``SIGINT`` and ``SIGTERM`` by draining active
-    HTTP connections before exiting.  The lifespan context manager additionally
-    waits for in-flight OpenAI SSE relays and closes the outbound HTTP client.
-    """
-    primal = load_config()
+    """Start the FastAPI server."""
+    primal = PrimalCodexConfig()
     uvicorn_config = uvicorn.Config(
         app,
         host=primal.server.host,
