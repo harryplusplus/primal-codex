@@ -75,7 +75,7 @@ async def healthz() -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-@app.post("/v1/chat/completions", response_model=None)
+@app.post("/chat/completions", response_model=None)
 async def chat_completions(request: Request) -> JSONResponse | StreamingResponse:
     """Chat Completions API — relays OpenAI streaming responses as SSE.
 
@@ -133,11 +133,11 @@ def run_serve() -> None:
     HTTP connections before exiting.  The lifespan context manager additionally
     waits for in-flight OpenAI SSE relays and closes the outbound HTTP client.
     """
-    cfg = load_config()
+    primal = load_config()
     uvicorn_config = uvicorn.Config(
         app,
-        host=cfg.server.host,
-        port=cfg.server.port,
+        host=primal.server.host,
+        port=primal.server.port,
     )
     server = uvicorn.Server(uvicorn_config)
     server.run()
