@@ -55,22 +55,30 @@ def run_codex() -> None:
         doc = tomlkit.parse("")
 
     # 3. Detect required changes.
-    desired = {
-        "model_provider": PRIMAL_CODEX_PROVIDER_ID,
-        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name": PRIMAL_CODEX_PROVIDER_ID,
-        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url": server_url,
-    }
-    changes: dict[str, str | None] = {
-        k: v for k, v in desired.items() if _get_toml_value(doc, k) != v
-    }
+    changed = False
 
     # Remove model_catalog_json if present — Primal Codex manages models
     # dynamically via its own endpoints; a static catalog would interfere.
     if doc.get("model_catalog_json") is not None:
         del doc["model_catalog_json"]
-        changes["model_catalog_json"] = None  # None marks deletion
+        changed = True
+        typer.echo(
+            "  Removed model_catalog_json (Primal Codex manages models dynamically)"
+        )
 
-    if not changes:
+    # Detect provider value changes.
+    desired = {
+        "model_provider": PRIMAL_CODEX_PROVIDER_ID,
+        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name": PRIMAL_CODEX_PROVIDER_ID,
+        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url": server_url,
+    }
+    changes: dict[str, str] = {
+        k: v for k, v in desired.items() if _get_toml_value(doc, k) != v
+    }
+    if changes:
+        changed = True
+
+    if not changed:
         typer.echo(f"Codex config is already up to date at {codex_path}")
         return
 
@@ -93,7 +101,4 @@ def run_codex() -> None:
     # 7. Report results.
     typer.echo(f"Updated Codex config at {codex_path}")
     for key, value in changes.items():
-        if value is None:
-            typer.echo(f"  Removed {key}")
-        else:
-            typer.echo(f"  Set {key} = {value!r}")
+        typer.echo(f"  Set {key} = {value!r}")
