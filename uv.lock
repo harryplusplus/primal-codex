@@ -72,8 +72,8 @@ requires-dist = [{ name = "typer", specifier = "==0.25.1" }]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pyrefly", specifier = ">=1.0.0" },
-    { name = "ruff", specifier = ">=0.15.13" },
+    { name = "pyrefly", specifier = "~=1.0.0" },
+    { name = "ruff", specifier = "~=0.15.13" },
 ]
 
 [[package]]

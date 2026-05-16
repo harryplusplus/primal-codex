@@ -1,27 +1,32 @@
-""""""
+"""Primal Codex CLI."""
 
 import typer
 
-app = typer.Typer(no_args_is_help=True)
+app = typer.Typer(no_args_is_help=True, rich_markup_mode="markdown")
 
 
 @app.command()
 def codex() -> None:
-    """Codex 구성 파일의 `model_provider` 관련 구성을 업데이트합니다.
+    """Update the `model_provider` configuration in the Codex config file.
 
-    기본 경로는 `$CODEX_HOME/config.toml`입니다.
-    환경변수 `CODEX_HOME` (fallback: `~/.codex`)을 존중합니다.
-    `$CODEX_HOME/config.toml` (fallback: `~/.codex/config.toml`)
+    The file is located at `$CODEX_HOME/config.toml` (fallback `~/.codex/config.toml`).
+
+    A backup of any existing file is saved as `<path>.bak`.
+
+    ### Environment Variables
+
+    - **`CODEX_HOME`** *(optional)* — Path to the Codex home directory.
+      Defaults to `~/.codex` if unset.
     """
 
 
 @app.command()
 def serve() -> None:
-    """Primal Codex API 서버를 실행합니다."""
+    """Start the Primal Codex API server."""
 
 
 def main() -> None:
-    """"""
+    """Entry point for the CLI."""
     app()
 
 
