@@ -72,11 +72,10 @@ def run_codex() -> None:
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name": PRIMAL_CODEX_PROVIDER_ID,
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url": server_url,
     }
-    changes: dict[str, str] = {
-        k: v for k, v in desired.items() if _get_toml_value(doc, k) != v
-    }
-    if changes:
-        changed = True
+    for key, value in desired.items():
+        if _get_toml_value(doc, key) != value:
+            changed = True
+            break
 
     if not changed:
         typer.echo(f"Codex config is already up to date at {codex_path}")
@@ -100,5 +99,5 @@ def run_codex() -> None:
 
     # 7. Report results.
     typer.echo(f"Updated Codex config at {codex_path}")
-    for key, value in changes.items():
+    for key, value in desired.items():
         typer.echo(f"  Set {key} = {value!r}")
