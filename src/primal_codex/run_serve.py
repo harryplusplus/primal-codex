@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from primal_codex.config import load_config
+from primal_codex.list_models import ModelsResponse, list_models
 
 
 class ActiveRelays:
@@ -73,6 +74,25 @@ app = FastAPI(lifespan=lifespan)
 async def healthz() -> JSONResponse:
     """Health check endpoint."""
     return JSONResponse({"status": "ok"})
+
+
+@app.get(
+    "/models",
+    summary="List Models",
+    description=(
+        "Return metadata for all models discovered from configured providers."
+    ),
+    tags=["models"],
+    response_description="A list of available models and their metadata.",
+)
+def models() -> ModelsResponse:
+    """List all available models with their metadata.
+
+    Reads model definitions from ``[providers.*.models.*]`` in the
+    Primal Codex TOML configuration and returns them sorted by
+    ``priority``, highest first.
+    """
+    return list_models(load_config())
 
 
 @app.post("/chat/completions", response_model=None)

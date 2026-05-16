@@ -9,11 +9,20 @@ entirely optional.
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from typing import Any
 
 import tomlkit
 from pydantic import BaseModel
 
 from primal_codex.paths import resolve_primal_codex_config_path
+
+
+def _base_instructions() -> str:
+    """Read and cache the contents of ``assets/prompt.md``."""
+    path = Path(__file__).resolve().parents[2] / "assets" / "prompt.md"
+    return path.read_text(encoding="utf-8")
+
 
 DEFAULT_CONFIG = """\
 # Primal Codex configuration.
@@ -40,9 +49,36 @@ DEFAULT_CONFIG = """\
 # env_key = "CROF_API_KEY"
 
 # [providers.crof.models."glm-5.1-precision"]
-# temperature = 0.7
-# max_tokens = 4096
+# display_name = "GLM 5.1 Precision"
+# priority = 100
+# truncation_policy = { mode = "tokens", limit = 10000 }
 """
+
+
+class TruncationPolicyConfig(BaseModel):
+    """Token truncation policy.
+
+    Attributes:
+        mode: Truncation unit, either ``bytes`` or ``tokens``.
+        limit: Maximum number of the chosen unit before truncation kicks in.
+
+    """
+
+    mode: str = "tokens"
+    limit: int = 10_000
+
+
+class ReasoningEffortPreset(BaseModel):
+    """A single reasoning-effort level with a human-readable description.
+
+    Attributes:
+        effort: Effort level identifier (e.g. ``low``, ``medium``, ``high``).
+        description: Free-text description of what this effort level means.
+
+    """
+
+    effort: str
+    description: str = ""
 
 
 class ServerConfig(BaseModel):
@@ -62,24 +98,77 @@ class PrimalCodexConfig(BaseModel):
     """Top-level Primal Codex configuration, loaded from TOML.
 
     Use :func:`load_config` to read the TOML file and construct an instance.
+
+    Attributes:
+        server: Server binding configuration.
+        providers: Provider-specific runtime settings keyed by provider name.
+            Models discovered under each provider are merged into a unified
+            list exposed via ``GET /models``.
+
     """
 
     server: ServerConfig = ServerConfig()
     providers: dict[str, ProviderConfig] = {}
 
+    def model_post_init(self, __context: object, /) -> None:
+        """Post-initialisation: fill per-model defaults.
+
+        For each model under every provider, fills ``display_name`` with
+        the model ID (the TOML key) and ``base_instructions`` with the
+        contents of ``assets/prompt.md`` when not explicitly set.
+        """
+        prompt: str | None = None
+        for provider in self.providers.values():
+            for mid, mc in provider.models.items():
+                if not mc.display_name:
+                    mc.display_name = mid
+                if mc.base_instructions is None:
+                    if prompt is None:
+                        prompt = _base_instructions()
+                    mc.base_instructions = prompt
+
 
 class ModelConfig(BaseModel):
-    """Configuration for a single model within a provider.
+    """Configuration and metadata for a single model within a provider.
+
+    ``temperature`` and ``max_tokens`` are runtime settings forwarded to
+    the upstream.  All other fields are metadata exposed via the
+    ``GET /models`` endpoint (mirrors the codex-compat ``ModelInfo``
+    schema).
 
     Attributes:
-        temperature: Sampling temperature. ``None`` means the provider default.
-        max_tokens: Maximum tokens per response. ``None`` means the provider
-            default.
+        display_name: Human-readable name. Defaults to the model ID (the
+            TOML key under ``[providers.<pid>.models]``).
+        supported_reasoning_levels: Reasoning effort levels this model
+            supports.
+        visibility: Visibility in model listings. One of ``list``,
+            ``hide``, ``none``.
+        supported_in_api: Whether the model is accessible through the API.
+        priority: Sort priority; higher values rank earlier.
+        base_instructions: System prompt for this model. ``None`` means
+            fall back to ``assets/prompt.md``; an empty string explicitly
+            disables the prompt.
+        supports_reasoning_summaries: Whether reasoning summaries are
+            available.
+        support_verbosity: Whether verbosity control is supported.
+        truncation_policy: Token or byte truncation policy.
+        supports_parallel_tool_calls: Whether parallel tool calling is
+            supported.
+        experimental_supported_tools: Experimental tool identifiers.
 
     """
 
-    temperature: float | None = None
-    max_tokens: int | None = None
+    display_name: str = ""
+    supported_reasoning_levels: list[ReasoningEffortPreset] = []
+    visibility: str = "list"
+    supported_in_api: bool = True
+    priority: int = 1
+    base_instructions: str | None = None
+    supports_reasoning_summaries: bool = True
+    support_verbosity: bool = False
+    truncation_policy: TruncationPolicyConfig = TruncationPolicyConfig()
+    supports_parallel_tool_calls: bool = True
+    experimental_supported_tools: list[Any] = []
 
 
 class ProviderConfig(BaseModel):
