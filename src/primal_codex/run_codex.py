@@ -46,7 +46,7 @@ def run_codex() -> None:
     primal = load_config()
     server_url = f"http://{primal.server.host}:{primal.server.port}"
 
-    # 2. Read the existing Codex config (if any).
+    # 2. Read the existing Codex config, or start fresh if absent.
     codex_path = resolve_codex_config_path()
     raw = codex_path.read_text(encoding="utf-8") if codex_path.exists() else ""
     doc = tomlkit.parse(raw)
