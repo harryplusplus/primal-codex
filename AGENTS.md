@@ -14,4 +14,4 @@
 - 개발 의존성(`dependency-groups.dev`)은 compatible release를 사용합니다 (`~=`).
   - 좋음: "ruff~=0.15.13"
   - 나쁨: "ruff>=0.15.13"
-- Python 파일 수정 후 `uv run ruff format ...`, `uv run ruff check ...` 하세요.
+- Python 파일 수정 후 `uv run ruff format <foo.py> <bar.py>`, `uv run ruff check --fix <foo.py> <bar.py>`를 실행하세요.
