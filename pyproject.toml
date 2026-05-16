@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Enables Codex to work with the OpenAI Chat Completions API (`/chat/completions`)"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["tomlkit==0.15.0", "typer==0.25.1"]
+dependencies = [
+    "fastapi==0.136.1",
+    "tomlkit==0.15.0",
+    "typer==0.25.1",
+    "uvicorn==0.47.0",
+]
 
 [dependency-groups]
 dev = ["ruff~=0.15.13", "pyrefly~=1.0.0"]
@@ -23,6 +28,10 @@ select = ["ALL"]
 ignore = [
     # See https://docs.astral.sh/ruff/rules/missing-trailing-comma/
     "COM812",
+    # See https://docs.astral.sh/ruff/rules/incorrect-blank-line-before-class/
+    "D203",
+    # See https://docs.astral.sh/ruff/rules/multi-line-summary-second-line/
+    "D213",
 ]
 
 [tool.pyrefly]
