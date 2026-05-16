@@ -1,6 +1,9 @@
 # AI 에이전트 작업자 가이드
 
 당신은 Primal Codex 프로젝트의 작업자입니다.
+먼저 [README](README.md)를 읽고 프로젝트에 대해 전반적인 이해를 하세요.
+절대 임의로 **가정하지 마세요.**
+모르는 것은 사용자에게 물어보세요.
 
 ## 작업 가이드라인
 - Python은 3.11 버전입니다.
@@ -14,4 +17,7 @@
 - 개발 의존성(`dependency-groups.dev`)은 compatible release를 사용합니다 (`~=`).
   - 좋음: "ruff~=0.15.13"
   - 나쁨: "ruff>=0.15.13"
-- Python 파일 수정 후 `uv run ruff format <foo.py> <bar.py>`, `uv run ruff check --fix <foo.py> <bar.py>`, `uv run pyrefly check <foo.py> <bar.py>`를 실행하세요.
+- Python 파일 수정 후 아래 명령어들을 실행하세요.
+  - `uv run ruff format <foo.py> <bar.py>`
+  - `uv run ruff check --fix <foo.py> <bar.py>`
+  - `uv run pyrefly check <foo.py> <bar.py>`
