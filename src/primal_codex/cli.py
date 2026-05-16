@@ -41,11 +41,10 @@ def codex() -> None:
 @app.command(
     help=f"""Start the Primal Codex API server.
 
-Reads settings from `{_PRIMAL_CODEX_CONFIG}` (default `{_PRIMAL_CODEX_CONFIG_DEFAULT}`)  
-to configure the server.
+Reads settings from `{_PRIMAL_CODEX_CONFIG}` (default `{_PRIMAL_CODEX_CONFIG_DEFAULT}`) to configure the server.
 
 ### Environment Variables
-- **`{_PRIMAL_CODEX_HOME_ENV_KEY}`** *(optional)* — Path to the Primal Codex home directory. Defaults to `{_PRIMAL_CODEX_HOME_DEFAULT}` if unset."""  # noqa: E501, W291
+- **`{_PRIMAL_CODEX_HOME_ENV_KEY}`** *(optional)* — Path to the Primal Codex home directory. Defaults to `{_PRIMAL_CODEX_HOME_DEFAULT}` if unset."""  # noqa: E501
 )
 def serve() -> None:
     """Start the Primal Codex API server."""
