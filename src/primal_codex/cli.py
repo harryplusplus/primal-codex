@@ -31,7 +31,7 @@ A backup of any existing target file is saved as `<path>.bak`.
   Defaults to `{CODEX_HOME_DISPLAY}` if unset."""  # noqa: E501
 )
 def codex() -> None:
-    """Update the Codex model_provider configuration."""
+    """Update Codex configuration based on Primal Codex settings."""
     run_codex()
 
 
