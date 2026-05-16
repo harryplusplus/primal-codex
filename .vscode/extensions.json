@@ -1,0 +1,9 @@
+{
+  "recommendations": [
+    "charliermarsh.ruff",
+    "meta.pyrefly",
+    "ms-python.debugpy",
+    "ms-python.python",
+    "tamasfe.even-better-toml"
+  ]
+}

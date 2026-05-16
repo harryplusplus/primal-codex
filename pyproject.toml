@@ -1,0 +1,26 @@
+[project]
+name = "primal-codex"
+version = "0.1.0"
+description = "Enables Codex to work with the OpenAI Chat Completions API (`/chat/completions`)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["typer==0.25.1"]
+
+[dependency-groups]
+dev = ["ruff~=0.15.13", "pyrefly~=1.0.0"]
+
+[project.scripts]
+primal-codex = "primal_codex.cli:main"
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+include = ["pyproject.toml", "src/**/*.py"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    # See https://docs.astral.sh/ruff/rules/missing-trailing-comma/
+    "COM812",
+]
