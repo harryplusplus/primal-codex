@@ -9,18 +9,16 @@ from primal_codex.run_codex import run_codex
 app = typer.Typer(no_args_is_help=True, rich_markup_mode="markdown")
 
 
-PRIMAL_CODEX_HOME_HELP = """- **`PRIMAL_CODEX_HOME`** *(optional)* - Path to the Primal Codex home directory. Defaults to `~/.primal-codex` if unset."""  # noqa: E501
-
-
 @app.command(
-    help=f"""Update the `model_provider` configuration in the Codex config file.
+    help="""Update Codex configuration based on Primal Codex settings.
 
-The file is located at `$CODEX_HOME/config.toml` (fallback `~/.codex/config.toml`).  
-A backup of any existing file is saved as `<path>.bak`.
+Reads settings from `$PRIMAL_CODEX_HOME/config.toml` (default `~/.primal-codex/config.toml`)  
+and partially updates `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`).  
+A backup of any existing target file is saved as `<path>.bak`.
 
 ### Environment Variables
-- **`CODEX_HOME`** *(optional)* — Path to the Codex home directory. Defaults to `~/.codex` if unset.
-{PRIMAL_CODEX_HOME_HELP}"""  # noqa: E501, W291
+- **`PRIMAL_CODEX_HOME`** *(optional)* — Path to the Primal Codex home directory. Defaults to `~/.primal-codex` if unset.
+- **`CODEX_HOME`** *(optional)* — Path to the Codex home directory. Defaults to `~/.codex` if unset."""  # noqa: E501, W291
 )
 def codex() -> None:
     """Update the Codex model_provider configuration."""
