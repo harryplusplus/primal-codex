@@ -36,6 +36,10 @@ class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8010
 
+    def url(self) -> str:
+        """Return the full server URL (scheme + host + port)."""
+        return f"http://{self.host}:{self.port}"
+
 
 class ProviderConfig(BaseModel):
     """Configuration for a single provider."""

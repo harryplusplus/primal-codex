@@ -2,8 +2,10 @@
 
 Covers:
 1. ``load_config()`` — file-based config loading with defaults.
-2. ``enrich_model()`` — single model enrichment (slug, fallbacks, field mapping).
-3. ``compute_model_map()`` — multi-model merge and provider-indexed nested map.
+2. ``ServerConfig.url()`` — URL string generation from host/port.
+3. ``ProviderConfig.resolve_api_key()`` — environment variable lookup.
+4. ``enrich_model()`` — single model enrichment (slug, fallbacks, field mapping).
+5. ``compute_model_map()`` — multi-model merge and provider-indexed nested map.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from typing import TYPE_CHECKING
 from primal_codex.config import (
     PrimalCodexConfig,
     ProviderConfig,
+    ServerConfig,
     compute_model_map,
     load_config,
 )
@@ -109,6 +112,30 @@ class TestLoadConfig:
         monkeypatch.setenv(PRIMAL_CODEX_HOME_ENV_KEY, str(tmp_primal_home))
         cfg = load_config()
         assert cfg.server.port == 8080
+
+
+class TestServerConfig:
+    """Tests for ``ServerConfig.url()``."""
+
+    def test_default_url(self) -> None:
+        """Return ``http://127.0.0.1:8010`` with default values."""
+        cfg = ServerConfig()
+        assert cfg.url() == "http://127.0.0.1:8010"
+
+    def test_custom_host(self) -> None:
+        """Use the custom host in the URL."""
+        cfg = ServerConfig(host="0.0.0.0")
+        assert cfg.url() == "http://0.0.0.0:8010"
+
+    def test_custom_port(self) -> None:
+        """Use the custom port in the URL."""
+        cfg = ServerConfig(port=9999)
+        assert cfg.url() == "http://127.0.0.1:9999"
+
+    def test_custom_host_and_port(self) -> None:
+        """Use both custom host and port in the URL."""
+        cfg = ServerConfig(host="0.0.0.0", port=443)
+        assert cfg.url() == "http://0.0.0.0:443"
 
 
 class TestProviderConfig:

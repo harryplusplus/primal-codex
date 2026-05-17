@@ -110,7 +110,7 @@ def run_codex() -> None:
     """
     # 1. Load the Primal Codex server config.
     primal_config = load_config()
-    server_url = f"http://{primal_config.server.host}:{primal_config.server.port}"
+    server_url = primal_config.server.url()
 
     # 2. Read the existing Codex config, or start fresh if absent.
     codex_path = resolve_codex_config_path()
