@@ -22,7 +22,8 @@
   - `uv run ruff check --fix <foo.py> <bar.py>`
   - `uv run pyrefly check <foo.py> <bar.py>`
 - Codex 클라이언트의 동작을 확인하려면 `external/codex` 경로에서 소스 코드를 확인하세요.
-- `codex` CLI를 실행할 때는 `CODEX_HOME=<tmp/path> RUST_LOG=debug codex` 명령어를 사용하세요.
+- `codex`를 실행할 때는 `CODEX_HOME=<tmp/path> RUST_LOG=debug codex` 명령어를 사용하세요.
+- `primal-codex`를 실행할 때는 `PRIMAL_CODEX_HOME=<tmp/path> CODEX_HOME=<tmp/path> uv run primal-codex` 명령어를 사용하세요.
 
 ## (TODO) 테스트
 
