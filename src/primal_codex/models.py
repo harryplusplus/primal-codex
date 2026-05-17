@@ -270,7 +270,7 @@ def enrich_model(
 
     return ModelInfo(
         slug=slug,
-        display_name=cfg.display_name or model_id,
+        display_name=cfg.display_name or slug,
         description=cfg.description,
         default_reasoning_level=cfg.default_reasoning_level,
         supported_reasoning_levels=cfg.supported_reasoning_levels or [],
