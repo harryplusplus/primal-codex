@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request
 if TYPE_CHECKING:
     from primal_codex.app_context import AppContext
 
-from primal_codex.models import ModelsResponse
+from primal_codex.models import ModelInfo, ModelsResponse
 
 router = APIRouter(tags=["models"])
 
@@ -21,6 +21,13 @@ router = APIRouter(tags=["models"])
     operation_id="list_models",
 )
 def list_models(request: Request) -> ModelsResponse:
-    """List all models — reads from pre-computed model info."""
+    """List all models — reads from pre-computed model info.
+
+    Models are sorted alphabetically by provider ID, then by model ID
+    within each provider, for a consistent display order.
+    """
     ctx: AppContext = request.app.state.ctx
-    return ModelsResponse(models=list(ctx.model_map.values()))
+    flat: list[ModelInfo] = []
+    for inner in ctx.model_map.values():
+        flat.extend(inner.values())
+    return ModelsResponse(models=flat)

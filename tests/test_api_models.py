@@ -94,8 +94,8 @@ class TestModelsEndpoint:
         slugs = {m["slug"] for m in response.json()["models"]}
         assert slugs == {"a/m1", "a/m2", "b/m3"}
 
-    def test_sorted_by_priority(self) -> None:
-        """Sort models by priority in ascending order."""
+    def test_sorted_alphabetically(self) -> None:
+        """Sort models alphabetically by provider, then by model ID."""
         config = PrimalCodexConfig(
             providers={
                 "p": ProviderConfig(
@@ -109,8 +109,9 @@ class TestModelsEndpoint:
         )
         client = TestClient(create_app(config))
         response = self._get(client)
-        priorities = [m["priority"] for m in response.json()["models"]]
-        assert priorities == sorted(priorities)
+        slugs = [m["slug"] for m in response.json()["models"]]
+        # Alphabetical by model_id: high, low, mid
+        assert slugs == ["p/high", "p/low", "p/mid"]
 
     def test_post_returns_405(self, client: TestClient) -> None:
         """Return 405 for ``POST /models``."""

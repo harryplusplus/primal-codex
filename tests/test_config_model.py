@@ -3,7 +3,7 @@
 Covers:
 1. ``load_config()`` — file-based config loading with defaults.
 2. ``enrich_model()`` — single model enrichment (slug, fallbacks, field mapping).
-3. ``compute_model_map()`` — multi-model merge and slug-indexed map.
+3. ``compute_model_map()`` — multi-model merge and provider-indexed nested map.
 """
 
 from __future__ import annotations
@@ -419,8 +419,9 @@ class TestComputeModelMap:
             }
         )
         model_map = compute_model_map(config)
-        assert len(model_map) == 1
-        info = model_map["crof/glm-5"]
+        assert set(model_map) == {"crof"}
+        assert set(model_map["crof"]) == {"glm-5"}
+        info = model_map["crof"]["glm-5"]
         assert info.slug == "crof/glm-5"
         assert info.display_name == "GLM-5"
 
@@ -433,10 +434,15 @@ class TestComputeModelMap:
             }
         )
         model_map = compute_model_map(config)
-        assert set(model_map) == {"a/m1", "a/m2", "b/m3"}
+        assert set(model_map) == {"a", "b"}
+        assert set(model_map["a"]) == {"m1", "m2"}
+        assert set(model_map["b"]) == {"m3"}
+        assert model_map["a"]["m1"].slug == "a/m1"
+        assert model_map["a"]["m2"].slug == "a/m2"
+        assert model_map["b"]["m3"].slug == "b/m3"
 
-    def test_sorted_by_priority(self) -> None:
-        """Insert models in ascending priority order."""
+    def test_priority_preserved(self) -> None:
+        """Preserve priority from config in each ModelInfo."""
         config = PrimalCodexConfig(
             providers={
                 "p": ProviderConfig(
@@ -449,8 +455,9 @@ class TestComputeModelMap:
             }
         )
         model_map = compute_model_map(config)
-        priorities = [m.priority for m in model_map.values()]
-        assert priorities == sorted(priorities)
+        assert model_map["p"]["low"].priority == 100
+        assert model_map["p"]["high"].priority == 10
+        assert model_map["p"]["mid"].priority == 50
 
     def test_base_instructions_comes_from_prompt_file(self) -> None:
         """Read base_instructions from the prompt.md file when not overridden."""
@@ -465,4 +472,4 @@ class TestComputeModelMap:
         prompt = (
             Path(__file__).resolve().parents[1] / "assets" / "prompt.md"
         ).read_text(encoding="utf-8")
-        assert model_map["p/m"].base_instructions == prompt
+        assert model_map["p"]["m"].base_instructions == prompt

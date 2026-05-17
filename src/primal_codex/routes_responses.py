@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
-from primal_codex.app_context import AppContext
+if TYPE_CHECKING:
+    from primal_codex.app_context import AppContext
+
 from primal_codex.responses import (
     ResponsesApiRequest,
     generate_response_id,
@@ -67,13 +70,18 @@ async def responses(
         )
 
     ctx: AppContext = request.app.state.ctx
-    if body.model not in ctx.model_map:
+    provider_id, _, model_id = body.model.partition("/")
+    if (
+        not provider_id
+        or not model_id
+        or provider_id not in ctx.model_map
+        or model_id not in ctx.model_map[provider_id]
+    ):
         return JSONResponse(
             {"error": f"Model not found: {body.model}"},
             status_code=HTTPStatus.BAD_REQUEST,
         )
 
-    provider_id, _ = body.model.split("/", 1)
     provider = ctx.primal_config.providers.get(provider_id)
     if provider is None or provider.base_url is None:
         return JSONResponse(

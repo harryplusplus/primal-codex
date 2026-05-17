@@ -58,19 +58,22 @@ class PrimalCodexConfig(BaseModel):
     providers: dict[str, ProviderConfig] = {}
 
 
-def compute_model_map(config: PrimalCodexConfig) -> dict[str, ModelInfo]:
-    """Build a slug-indexed map from every raw ``ModelConfig``.
+def compute_model_map(config: PrimalCodexConfig) -> dict[str, dict[str, ModelInfo]]:
+    """Build a provider-indexed, nested map from every raw ``ModelConfig``.
 
-    Insertion order follows ascending priority so that
-    ``list(result.values())`` is already sorted.
+    The outer key is the provider ID, the inner key is the model ID (without
+    the ``provider_id/`` prefix). Both levels are sorted alphabetically so
+    that iteration order is immediately usable for display.
     """
     default_prompt = PROMPT_PATH.read_text(encoding="utf-8")
-    entries: list[ModelInfo] = []
-    for pid, provider in config.providers.items():
-        for key, cfg in provider.models.items():
-            entries.append(enrich_model(key, pid, cfg, default_prompt))
-    entries.sort(key=lambda m: m.priority)
-    return {m.slug: m for m in entries}
+    result: dict[str, dict[str, ModelInfo]] = {}
+    for pid in sorted(config.providers):
+        provider = config.providers[pid]
+        inner: dict[str, ModelInfo] = {}
+        for mid in sorted(provider.models):
+            inner[mid] = enrich_model(mid, pid, provider.models[mid], default_prompt)
+        result[pid] = inner
+    return result
 
 
 def load_config() -> PrimalCodexConfig:

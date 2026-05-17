@@ -15,4 +15,4 @@ class AppContext:
     """Type-safe holder for application-wide state."""
 
     primal_config: PrimalCodexConfig
-    model_map: dict[str, ModelInfo]
+    model_map: dict[str, dict[str, ModelInfo]]
