@@ -13,6 +13,7 @@ import shutil
 
 import tomlkit
 import typer
+from tomlkit import TOMLDocument
 
 from primal_codex.config import load_config
 from primal_codex.paths import resolve_codex_config_path
@@ -20,7 +21,14 @@ from primal_codex.paths import resolve_codex_config_path
 PRIMAL_CODEX_PROVIDER_ID = "primal-codex"
 
 
-def _get_toml_value(doc: dict, key: str) -> object:
+class _DeleteMarker:
+    """Sentinel type for marking a TOML key to be removed."""
+
+
+_DELETE = _DeleteMarker()
+
+
+def _get_toml_value(doc: TOMLDocument, key: str) -> object:
     """Walk a dotted key path (e.g. ``"a.b.c"``) into a tomlkit document."""
     parts = key.split(".")
     current: object = doc
@@ -36,6 +44,46 @@ def _get_toml_value(doc: dict, key: str) -> object:
         return current
 
 
+def _set_toml_value(doc: TOMLDocument, key: str, value: object) -> None:
+    """Set a dotted key path in a dict-like document.
+
+    Intermediate containers are created via ``setdefault`` when they do not
+    exist.
+    """
+    parts = key.split(".")
+    current = doc
+    for part in parts[:-1]:
+        current = current.setdefault(part, {})
+    current[parts[-1]] = value
+
+
+def _delete_toml_key(doc: TOMLDocument, key: str) -> None:
+    """Remove a dotted key path from a dict-like document.
+
+    Silently returns when the key or any of its parent containers does not
+    exist.
+    """
+    parts = key.split(".")
+    current = doc
+    for part in parts[:-1]:
+        current = current.get(part)
+        if not isinstance(current, dict):
+            return
+    current.pop(parts[-1], None)
+
+
+def _detect_changes(doc: TOMLDocument, desired: dict[str, object]) -> bool:
+    """Return ``True`` when any desired value differs from the current document."""
+    for key, value in desired.items():
+        current = _get_toml_value(doc, key)
+        if isinstance(value, _DeleteMarker):
+            if current is not None:
+                return True
+        elif current != value:
+            return True
+    return False
+
+
 def run_codex() -> None:
     """Update Codex configuration based on Primal Codex settings.
 
@@ -43,37 +91,27 @@ def run_codex() -> None:
     from the Primal Codex config and writes changes only when necessary.
     """
     # 1. Load the Primal Codex server config.
-    primal = load_config()
-    server_url = f"http://{primal.server.host}:{primal.server.port}"
+    primal_config = load_config()
+    server_url = f"http://{primal_config.server.host}:{primal_config.server.port}"
 
     # 2. Read the existing Codex config, or start fresh if absent.
     codex_path = resolve_codex_config_path()
     raw = codex_path.read_text(encoding="utf-8") if codex_path.exists() else ""
     doc = tomlkit.parse(raw)
 
-    # 3. Detect required changes.
-    changed = False
-
-    # Remove model_catalog_json if present — Primal Codex manages models
-    # dynamically via its own endpoints; a static catalog would interfere.
-    if doc.get("model_catalog_json") is not None:
-        del doc["model_catalog_json"]
-        changed = True
-        typer.echo(
-            "  Removed model_catalog_json (Primal Codex manages models dynamically)"
-        )
-
-    # Detect provider value changes.
-    desired = {
+    # 3. Define the desired state — the single source of truth for all changes.
+    desired: dict[str, object] = {
         "model_provider": PRIMAL_CODEX_PROVIDER_ID,
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name": PRIMAL_CODEX_PROVIDER_ID,
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url": server_url,
+        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.supports_websockets": False,
+        # Primal Codex manages models dynamically via its own endpoints; a
+        # static catalog would interfere.
+        "model_catalog_json": _DELETE,
     }
-    for key, value in desired.items():
-        if _get_toml_value(doc, key) != value:
-            changed = True
-            break
 
+    # 4. Detect whether any change is needed.
+    changed = _detect_changes(doc, desired)
     if not changed:
         typer.echo(f"Codex config is already up to date at {codex_path}")
         return
@@ -84,13 +122,13 @@ def run_codex() -> None:
         shutil.copy2(codex_path, bak_path)
         typer.echo(f"Backed up existing config to {bak_path}")
 
-    # 6. Apply changes with tomlkit (preserves formatting of untouched sections).
-    doc["model_provider"] = PRIMAL_CODEX_PROVIDER_ID
-    providers = doc.setdefault("model_providers", {})
-    entry = providers.setdefault(PRIMAL_CODEX_PROVIDER_ID, {})
-    entry["name"] = PRIMAL_CODEX_PROVIDER_ID
-    entry["base_url"] = server_url
-    entry["supports_websockets"] = False
+    # 6. Apply all desired changes using tomlkit (preserves formatting of
+    #    untouched sections).
+    for key, value in desired.items():
+        if isinstance(value, _DeleteMarker):
+            _delete_toml_key(doc, key)
+        else:
+            _set_toml_value(doc, key, value)
 
     codex_path.parent.mkdir(parents=True, exist_ok=True)
     codex_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
@@ -98,4 +136,7 @@ def run_codex() -> None:
     # 7. Report results.
     typer.echo(f"Updated Codex config at {codex_path}")
     for key, value in desired.items():
-        typer.echo(f"  Set {key} = {value!r}")
+        if isinstance(value, _DeleteMarker):
+            typer.echo(f"  Removed {key} (Primal Codex manages models dynamically)")
+        else:
+            typer.echo(f"  Set {key} = {value!r}")

@@ -84,9 +84,14 @@ class TestCodex:
             f"Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url"
             " = 'http://127.0.0.1:8010'"
         )
+        set_ws = (
+            f"Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.supports_websockets"
+            " = False"
+        )
         assert set_provider in result.stdout
         assert set_name in result.stdout
         assert set_url in result.stdout
+        assert set_ws in result.stdout
 
     def test_codex_already_up_to_date(
         self,
