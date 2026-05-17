@@ -22,7 +22,7 @@ primal-codex = "primal_codex.cli:main"
 package = true
 
 [tool.ruff]
-include = ["pyproject.toml", "src/**/*.py"]
+include = ["pyproject.toml", "src/**/*.py", "tests/**/*.py"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -35,5 +35,11 @@ ignore = [
     "D213",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    # See https://docs.astral.sh/ruff/rules/assert/
+    "S101",
+]
+
 [tool.pyrefly]
-project-includes = ["src/**/*.py"]
+project-includes = ["src/**/*.py", "tests/**/*.py"]
