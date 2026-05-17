@@ -211,8 +211,8 @@ class ModelsResponse(BaseModel):
 class ModelConfig(BaseModel):
     """User-supplied model configuration from TOML.
 
-    All fields are optional — the server provides sensible defaults when a
-    field is omitted (set to ``None``).
+    Every field is optional in TOML — Pydantic defaults are used when omitted.
+    ``None``-typed fields are passed through to ``ModelInfo`` as-is.
     """
 
     display_name: str | None = None
@@ -221,34 +221,38 @@ class ModelConfig(BaseModel):
     supported_reasoning_levels: list[ReasoningEffortPreset] = Field(
         default_factory=list
     )
-    shell_type: ConfigShellToolType | None = None
-    visibility: ModelVisibility | None = None
-    supported_in_api: bool | None = None
-    priority: int | None = None
+    shell_type: ConfigShellToolType = ConfigShellToolType.shell_command
+    visibility: ModelVisibility = ModelVisibility.list
+    supported_in_api: bool = True
+    priority: int = 0
     additional_speed_tiers: list[str] = Field(default_factory=list)
     service_tiers: list[ModelServiceTier] = Field(default_factory=list)
     availability_nux: ModelAvailabilityNux | None = None
     upgrade: ModelInfoUpgrade | None = None
     base_instructions: str | None = None
     model_messages: ModelMessages | None = None
-    supports_reasoning_summaries: bool | None = None
-    default_reasoning_summary: ReasoningSummary | None = None
-    support_verbosity: bool | None = None
+    supports_reasoning_summaries: bool = False
+    default_reasoning_summary: ReasoningSummary = ReasoningSummary.auto
+    support_verbosity: bool = False
     default_verbosity: Verbosity | None = None
     apply_patch_tool_type: ApplyPatchToolType | None = None
-    web_search_tool_type: WebSearchToolType | None = None
-    truncation_policy: TruncationPolicyConfig | None = None
-    supports_parallel_tool_calls: bool | None = None
-    supports_image_detail_original: bool | None = None
+    web_search_tool_type: WebSearchToolType = WebSearchToolType.text
+    truncation_policy: TruncationPolicyConfig = Field(
+        default_factory=lambda: TruncationPolicyConfig(
+            mode=TruncationMode.bytes, limit=10_000
+        )
+    )
+    supports_parallel_tool_calls: bool = False
+    supports_image_detail_original: bool = False
     context_window: int | None = None
     max_context_window: int | None = None
     auto_compact_token_limit: int | None = None
-    effective_context_window_percent: int | None = None
+    effective_context_window_percent: int = 95
     experimental_supported_tools: list[str] = Field(default_factory=list)
     input_modalities: list[InputModality] = Field(
         default_factory=lambda: [InputModality.text, InputModality.image]
     )
-    supports_search_tool: bool | None = None
+    supports_search_tool: bool = False
 
 
 def enrich_model(
@@ -278,12 +282,10 @@ def enrich_model(
         description=cfg.description,
         default_reasoning_level=cfg.default_reasoning_level,
         supported_reasoning_levels=cfg.supported_reasoning_levels,
-        shell_type=cfg.shell_type or ConfigShellToolType.shell_command,
-        visibility=cfg.visibility or ModelVisibility.list,
-        supported_in_api=cfg.supported_in_api
-        if cfg.supported_in_api is not None
-        else True,
-        priority=cfg.priority if cfg.priority is not None else 0,
+        shell_type=cfg.shell_type,
+        visibility=cfg.visibility,
+        supported_in_api=cfg.supported_in_api,
+        priority=cfg.priority,
         additional_speed_tiers=cfg.additional_speed_tiers,
         service_tiers=cfg.service_tiers,
         availability_nux=cfg.availability_nux,
@@ -292,34 +294,20 @@ def enrich_model(
         if cfg.base_instructions is not None
         else default_base_instructions,
         model_messages=cfg.model_messages,
-        supports_reasoning_summaries=cfg.supports_reasoning_summaries
-        if cfg.supports_reasoning_summaries is not None
-        else False,
-        default_reasoning_summary=cfg.default_reasoning_summary
-        or ReasoningSummary.auto,
-        support_verbosity=cfg.support_verbosity
-        if cfg.support_verbosity is not None
-        else False,
+        supports_reasoning_summaries=cfg.supports_reasoning_summaries,
+        default_reasoning_summary=cfg.default_reasoning_summary,
+        support_verbosity=cfg.support_verbosity,
         default_verbosity=cfg.default_verbosity,
         apply_patch_tool_type=cfg.apply_patch_tool_type,
-        web_search_tool_type=cfg.web_search_tool_type or WebSearchToolType.text,
-        truncation_policy=cfg.truncation_policy
-        or TruncationPolicyConfig(mode=TruncationMode.bytes, limit=10_000),
-        supports_parallel_tool_calls=cfg.supports_parallel_tool_calls
-        if cfg.supports_parallel_tool_calls is not None
-        else False,
-        supports_image_detail_original=cfg.supports_image_detail_original
-        if cfg.supports_image_detail_original is not None
-        else False,
+        web_search_tool_type=cfg.web_search_tool_type,
+        truncation_policy=cfg.truncation_policy,
+        supports_parallel_tool_calls=cfg.supports_parallel_tool_calls,
+        supports_image_detail_original=cfg.supports_image_detail_original,
         context_window=cfg.context_window,
         max_context_window=cfg.max_context_window,
         auto_compact_token_limit=cfg.auto_compact_token_limit,
-        effective_context_window_percent=cfg.effective_context_window_percent
-        if cfg.effective_context_window_percent is not None
-        else 95,
+        effective_context_window_percent=cfg.effective_context_window_percent,
         experimental_supported_tools=cfg.experimental_supported_tools,
         input_modalities=cfg.input_modalities,
-        supports_search_tool=cfg.supports_search_tool
-        if cfg.supports_search_tool is not None
-        else False,
+        supports_search_tool=cfg.supports_search_tool,
     )
