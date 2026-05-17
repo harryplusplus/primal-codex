@@ -22,12 +22,14 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-pytestmark = pytest.mark.skipif(
-    "CROF_API_KEY" not in os.environ,
-    reason="CROF_API_KEY environment variable is required",
-)
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture(autouse=True)
+def _require_api_key() -> None:
+    """Fail immediately if the required API key is missing."""
+    if "CROF_API_KEY" not in os.environ:
+        pytest.fail("CROF_API_KEY environment variable is required")
 
 _UV_BIN = os.environ.get("UV", shutil.which("uv") or "uv")
 _CODEX_BIN = shutil.which("codex") or "codex"

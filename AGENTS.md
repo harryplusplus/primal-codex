@@ -22,17 +22,19 @@
   - `uv run ruff check --fix <foo.py> <bar.py>`
   - `uv run pyrefly check <foo.py> <bar.py>`
 - Codex 클라이언트의 동작을 확인하려면 `external/codex` 경로에서 소스 코드를 확인하세요.
-- `codex`를 실행할 때는 `CODEX_HOME=<tmp/path> RUST_LOG=debug codex` 명령어를 사용하세요.
-- `primal-codex`를 실행할 때는 `PRIMAL_CODEX_HOME=<tmp/path> CODEX_HOME=<tmp/path> uv run primal-codex` 명령어를 사용하세요.
+- `codex` CLI를 실행할 때는 `CODEX_HOME=<tmp/codex> RUST_LOG=debug codex` 명령어를 사용하세요.
+- `primal-codex` CLI를 실행할 때는 `PRIMAL_CODEX_HOME=<tmp/primal-codex> CODEX_HOME=<tmp/codex> uv run primal-codex` 명령어를 사용하세요.
 
-## (TODO) 테스트
+## 테스트
+
+`uv run pytest`로 실행합니다.
 
 ### 유닛 테스트
 
-Typer, FastAPI의 테스트 기능을 적극 활용해야합니다.
+`typer.testing.CliRunner`, `fastapi.testclient.TestClient`를 사용합니다.
+공유 fixture는 `tests/conftest.py`에 정의되어 있습니다.
 
 ### 통합 테스트
 
-`codex` CLI, 실제 LLM API를 시나리오 별로 실행하는 통합 테스트가 필요합니다.
-
-텍스트, 이미지, 도구 호출, 멀티턴 등 기능 누락이 발생할 때마다 통합 테스트를 추가해야 합니다.
+`tests/test_integration.py` — `CROF_API_KEY` 없으면 `pytest.fail()`로 실패.
+텍스트, 이미지, 도구 호출, 멀티턴 등 기능이 추가될 때마다 시나리오 클래스를 추가하세요.
