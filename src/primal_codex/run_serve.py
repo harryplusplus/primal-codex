@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Any
 
 import uvicorn
@@ -11,6 +12,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from primal_codex.config import PrimalCodexConfig, compute_model_infos, load_config
 from primal_codex.models import ModelInfo, ModelsResponse
+
+
+@dataclass
+class AppContext:
+    """Type-safe holder for application-wide state."""
+
+    primal_config: PrimalCodexConfig
+    model_infos: list[ModelInfo]
+    relays: "ActiveRelays"
 
 
 class ActiveRelays:
@@ -57,11 +67,13 @@ def _lookup_model(infos: list[ModelInfo], slug: str) -> ModelInfo | None:
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     """Load config once on startup; drain relays on shutdown."""
     primal_config = load_config()
-    app.state.primal_config = primal_config
-    app.state.model_infos = compute_model_infos(primal_config)
-    app.state.relays = ActiveRelays()
+    app.state.ctx = AppContext(
+        primal_config=primal_config,
+        model_infos=compute_model_infos(primal_config),
+        relays=ActiveRelays(),
+    )
     yield
-    await app.state.relays.wait_all()
+    await app.state.ctx.relays.wait_all()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -82,7 +94,7 @@ async def healthz() -> JSONResponse:
 )
 def models(request: Request) -> ModelsResponse:
     """List all models — reads from pre-computed model info."""
-    return ModelsResponse(models=request.app.state.model_infos)
+    return ModelsResponse(models=request.app.state.ctx.model_infos)
 
 
 @app.post("/responses", response_model=None)
@@ -97,7 +109,8 @@ async def responses(
     #   https://github.com/primal-codex/primal-codex/issues/1
     _ = body  # use body.get("model") for model lookup
     if stream:
-        relays: ActiveRelays = request.app.state.relays
+        ctx: AppContext = request.app.state.ctx
+        relays: ActiveRelays = ctx.relays
 
         async def _relay_stream() -> AsyncIterator[str]:
             """Relay upstream streaming chunks as SSE."""
