@@ -67,31 +67,37 @@ class TestCodex:
         config_path = tmp_codex_home / "config.toml"
         assert f"Updated Codex config at {config_path}" in result.stdout
 
-    def test_codex_prints_custom_messages(
+    def test_codex_prints_default_and_custom_messages(
         self,
         cli_runner: CliRunner,
         cli_env: dict[str, str],
     ) -> None:
-        """Print custom messages for each desired value."""
+        """Print default 'Set key = value' and custom messages where needed."""
         result = cli_runner.invoke(app, ["codex"], env=cli_env)
+        stdout = result.stdout
 
+        # Keys without a reason use the default format.
+        assert f"Set model_provider = {PRIMAL_CODEX_PROVIDER_ID!r}" in stdout
         assert (
-            f"Use '{PRIMAL_CODEX_PROVIDER_ID}' as the model provider" in result.stdout
-        )
-        assert f"Register model provider '{PRIMAL_CODEX_PROVIDER_ID}'" in result.stdout
-        assert (
-            f"Point '{PRIMAL_CODEX_PROVIDER_ID}' at http://127.0.0.1:8010"
-            in result.stdout
+            f"Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name"
+            f" = {PRIMAL_CODEX_PROVIDER_ID!r}" in stdout
         )
         assert (
-            f"'{PRIMAL_CODEX_PROVIDER_ID}' uses HTTP SSE streaming, not WebSocket"
-            in result.stdout
+            f"Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url"
+            " = 'http://127.0.0.1:8010'" in stdout
         )
-        removed_msg = (
+
+        # supports_websockets has a reason appended in parentheses.
+        assert (
+            f"Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.supports_websockets"
+            " = False (Primal Codex uses HTTP SSE streaming, not WebSocket)" in stdout
+        )
+
+        # Removed keys with a reason.
+        assert (
             "Removed model_catalog_json"
-            " (Primal Codex provides model discovery via /models)"
+            " (Primal Codex provides model discovery via /models)" in stdout
         )
-        assert removed_msg in result.stdout
 
     def test_codex_already_up_to_date(
         self,
@@ -227,15 +233,12 @@ class TestCodex:
 
         result = cli_runner.invoke(app, ["codex"], env=cli_env)
 
-        # Both changes reported with their custom messages.
-        removed_msg = (
-            "Removed model_catalog_json"
-            " (Primal Codex provides model discovery via /models)"
-        )
-        assert removed_msg in result.stdout
+        # Both changes reported — removal with reason, provider fix with default format.
         assert (
-            f"Use '{PRIMAL_CODEX_PROVIDER_ID}' as the model provider" in result.stdout
+            "Removed model_catalog_json"
+            " (Primal Codex provides model discovery via /models)" in result.stdout
         )
+        assert f"Set model_provider = {PRIMAL_CODEX_PROVIDER_ID!r}" in result.stdout
 
         # Both applied to the file.
         with config_path.open("rb") as f:
