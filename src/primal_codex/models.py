@@ -239,7 +239,7 @@ class ModelConfig(BaseModel):
     web_search_tool_type: WebSearchToolType = WebSearchToolType.text
     truncation_policy: TruncationPolicyConfig = Field(
         default_factory=lambda: TruncationPolicyConfig(
-            mode=TruncationMode.bytes, limit=10_000
+            mode=TruncationMode.tokens, limit=10_000
         )
     )
     supports_parallel_tool_calls: bool = False

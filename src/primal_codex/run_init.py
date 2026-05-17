@@ -2,7 +2,7 @@
 
 import typer
 
-from primal_codex.config import DEFAULT_CONFIG
+from primal_codex.config import get_default_config
 from primal_codex.paths import resolve_primal_codex_config_path
 
 
@@ -20,5 +20,5 @@ def run_init() -> None:
         return
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(DEFAULT_CONFIG, encoding="utf-8")
+    path.write_text(get_default_config(), encoding="utf-8")
     typer.echo(f"Created default config at {path}")

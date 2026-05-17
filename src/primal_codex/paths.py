@@ -49,6 +49,6 @@ def resolve_codex_config_path() -> Path:
     return (Path(env) if env else CODEX_HOME_DEFAULT) / CONFIG_FILENAME
 
 
-# Path to the built-in system prompt shipped with the package.
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_PATH = _PROJECT_ROOT / "assets" / "prompt.md"
+DEFAULT_CONFIG_PATH = _PROJECT_ROOT / "assets" / "default-config.toml"
