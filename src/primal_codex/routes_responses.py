@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from http import HTTPStatus
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import ValidationError
 
-if TYPE_CHECKING:
-    from fastapi.responses import JSONResponse, StreamingResponse
-
-from primal_codex.responses import handle_responses
+from primal_codex.app_context import AppContext
+from primal_codex.responses import (
+    ResponsesApiRequest,
+    generate_response_id,
+    relay_stream,
+)
 
 router = APIRouter()
 
@@ -26,5 +31,65 @@ router = APIRouter()
 async def responses(
     request: Request,
 ) -> JSONResponse | StreamingResponse:
-    """Relay upstream responses as JSON or SSE."""
-    return await handle_responses(request)
+    """Handle a ``POST /responses`` request.
+
+    Parses and validates the request body with Pydantic, then streams
+    the relayed response as server-sent events.
+
+    Args:
+        request: The incoming FastAPI request.
+
+    Returns:
+        A ``StreamingResponse`` for valid streaming requests, or a
+        ``JSONResponse`` error otherwise.
+
+    """
+    try:
+        raw = await request.json()
+    except json.JSONDecodeError as e:
+        return JSONResponse(
+            {"error": f"Invalid JSON in request body: {e}"},
+            status_code=HTTPStatus.BAD_REQUEST,
+        )
+
+    try:
+        body = ResponsesApiRequest.model_validate(raw)
+    except ValidationError as e:
+        return JSONResponse(
+            {"error": f"Invalid request body: {e}"},
+            status_code=HTTPStatus.BAD_REQUEST,
+        )
+
+    if not body.stream:
+        return JSONResponse(
+            {"error": "Only streaming responses are supported."},
+            status_code=HTTPStatus.BAD_REQUEST,
+        )
+
+    ctx: AppContext = request.app.state.ctx
+    if body.model not in ctx.model_map:
+        return JSONResponse(
+            {"error": f"Model not found: {body.model}"},
+            status_code=HTTPStatus.BAD_REQUEST,
+        )
+
+    provider_id, _ = body.model.split("/", 1)
+    provider = ctx.primal_config.providers.get(provider_id)
+    if provider is None or provider.base_url is None:
+        return JSONResponse(
+            {"error": f"Provider not found for model: {body.model}"},
+            status_code=HTTPStatus.BAD_REQUEST,
+        )
+
+    api_key = provider.resolve_api_key()
+
+    response_id = generate_response_id()
+
+    return StreamingResponse(
+        relay_stream(body, provider.base_url, api_key, response_id),
+        media_type="text/event-stream",
+        headers={
+            "cache-control": "no-cache",
+            "x-accel-buffering": "no",
+        },
+    )

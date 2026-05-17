@@ -3,12 +3,9 @@
 import json
 import os
 from collections.abc import AsyncIterator
-from http import HTTPStatus
 from typing import Any
 
 import openai
-from fastapi import Request
-from fastapi.responses import JSONResponse, StreamingResponse
 from openai import AsyncOpenAI, AsyncStream
 from openai.types.chat.chat_completion_assistant_message_param import (
     ChatCompletionAssistantMessageParam,
@@ -49,7 +46,7 @@ from openai.types.responses.response_format_text_json_schema_config import (
 from openai.types.responses.response_input_content import ResponseInputContent
 from openai.types.responses.response_text_config import ResponseTextConfig
 from openai.types.shared.reasoning import Reasoning
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 
 class ResponsesApiRequest(BaseModel):
@@ -248,72 +245,7 @@ def responses_to_chat_completions(body: ResponsesApiRequest) -> dict[str, Any]:
     return result
 
 
-async def handle_responses(request: Request) -> JSONResponse | StreamingResponse:
-    """Handle a ``POST /responses`` request.
-
-    Parses and validates the request body with Pydantic, then streams
-    the relayed response as server-sent events.
-
-    Args:
-        request: The incoming FastAPI request.
-
-    Returns:
-        A ``StreamingResponse`` for valid streaming requests, or a
-        ``JSONResponse`` error otherwise.
-
-    """
-    try:
-        raw = await request.json()
-    except json.JSONDecodeError as e:
-        return JSONResponse(
-            {"error": f"Invalid JSON in request body: {e}"},
-            status_code=HTTPStatus.BAD_REQUEST,
-        )
-
-    try:
-        body = ResponsesApiRequest.model_validate(raw)
-    except ValidationError as e:
-        return JSONResponse(
-            {"error": f"Invalid request body: {e}"},
-            status_code=HTTPStatus.BAD_REQUEST,
-        )
-
-    if not body.stream:
-        return JSONResponse(
-            {"error": "Only streaming responses are supported."},
-            status_code=HTTPStatus.BAD_REQUEST,
-        )
-
-    ctx = request.app.state.ctx
-    if body.model not in ctx.model_map:
-        return JSONResponse(
-            {"error": f"Model not found: {body.model}"},
-            status_code=HTTPStatus.BAD_REQUEST,
-        )
-
-    provider_id, _ = body.model.split("/", 1)
-    provider = ctx.primal_config.providers.get(provider_id)
-    if provider is None or provider.base_url is None:
-        return JSONResponse(
-            {"error": f"Provider not found for model: {body.model}"},
-            status_code=HTTPStatus.BAD_REQUEST,
-        )
-
-    api_key = provider.resolve_api_key()
-
-    response_id = _generate_response_id()
-
-    return StreamingResponse(
-        _relay_stream(body, provider.base_url, api_key, response_id),
-        media_type="text/event-stream",
-        headers={
-            "cache-control": "no-cache",
-            "x-accel-buffering": "no",
-        },
-    )
-
-
-def _generate_response_id() -> str:
+def generate_response_id() -> str:
     """Generate a unique response ID.
 
     Sample: resp_0309c0d6cb4ff519016a032143c2288191b3759a2e031f11b2
@@ -512,7 +444,7 @@ async def _emit_content_events(
         )
 
 
-async def _relay_stream(
+async def relay_stream(
     body: ResponsesApiRequest,
     base_url: str,
     api_key: str | None,
