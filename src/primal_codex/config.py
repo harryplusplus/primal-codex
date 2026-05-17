@@ -44,7 +44,7 @@ class ServerConfig(BaseModel):
 class ProviderConfig(BaseModel):
     """Configuration for a single provider."""
 
-    base_url: str | None = None
+    base_url: str
     env_key: str | None = None
     models: dict[str, ModelConfig] = {}
 

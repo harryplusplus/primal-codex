@@ -83,14 +83,13 @@ async def responses(
         )
 
     provider = ctx.primal_config.providers.get(provider_id)
-    if provider is None or provider.base_url is None:
+    if provider is None:
         return JSONResponse(
             {"error": f"Provider not found for model: {body.model}"},
             status_code=HTTPStatus.BAD_REQUEST,
         )
 
     api_key = provider.resolve_api_key()
-
     response_id = generate_response_id()
 
     return StreamingResponse(

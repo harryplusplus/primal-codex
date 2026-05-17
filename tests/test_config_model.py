@@ -151,13 +151,13 @@ class TestProviderConfig:
     ) -> None:
         """Return None when the configured env var is unset."""
         monkeypatch.delenv("MY_TEST_KEY", raising=False)
-        provider = ProviderConfig(env_key="MY_TEST_KEY")
+        provider = ProviderConfig(base_url="https://example.com", env_key="MY_TEST_KEY")
         assert provider.resolve_api_key() is None
 
     def test_env_var_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Read the env var value when set."""
         monkeypatch.setenv("MY_TEST_KEY", "sk-secret")
-        provider = ProviderConfig(env_key="MY_TEST_KEY")
+        provider = ProviderConfig(base_url="https://example.com", env_key="MY_TEST_KEY")
         assert provider.resolve_api_key() == "sk-secret"
 
 
@@ -439,9 +439,10 @@ class TestComputeModelMap:
         config = PrimalCodexConfig(
             providers={
                 "crof": ProviderConfig(
+                    base_url="https://crof.ai/v1",
                     models={
                         "glm-5": ModelConfig(display_name="GLM-5"),
-                    }
+                    },
                 ),
             }
         )
@@ -456,8 +457,13 @@ class TestComputeModelMap:
         """Include models from all providers."""
         config = PrimalCodexConfig(
             providers={
-                "a": ProviderConfig(models={"m1": ModelConfig(), "m2": ModelConfig()}),
-                "b": ProviderConfig(models={"m3": ModelConfig()}),
+                "a": ProviderConfig(
+                    base_url="https://a.ai",
+                    models={"m1": ModelConfig(), "m2": ModelConfig()},
+                ),
+                "b": ProviderConfig(
+                    base_url="https://b.ai", models={"m3": ModelConfig()}
+                ),
             }
         )
         model_map = compute_model_map(config)
@@ -473,11 +479,12 @@ class TestComputeModelMap:
         config = PrimalCodexConfig(
             providers={
                 "p": ProviderConfig(
+                    base_url="https://p.ai",
                     models={
                         "low": ModelConfig(priority=100),
                         "high": ModelConfig(priority=10),
                         "mid": ModelConfig(priority=50),
-                    }
+                    },
                 ),
             }
         )
@@ -491,6 +498,7 @@ class TestComputeModelMap:
         config = PrimalCodexConfig(
             providers={
                 "p": ProviderConfig(
+                    base_url="https://p.ai",
                     models={"m": ModelConfig()},
                 ),
             }
