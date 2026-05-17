@@ -1,9 +1,21 @@
-"""Response handling for the ``/responses`` endpoint."""
+"""Response handling for the ``/responses`` endpoint.
+
+SSE event payload types
+    The TypedDict classes in this module (``ResponseCreatedEvent``,
+    ``ResponseCompletedEvent``, etc.) share type names with the OpenAI
+    SDK's corresponding Pydantic models so that developers can
+    cross-reference during review.
+
+    Every class docstring lists two reference types:
+        * OpenAI SDK path — the client-side Pydantic model.
+        * Codex Rust path — the struct the Codex CLI uses to
+          deserialise the event.
+"""
 
 import json
 import os
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 
 import openai
 from openai import AsyncOpenAI, AsyncStream
@@ -49,20 +61,864 @@ from openai.types.shared.reasoning import Reasoning
 from pydantic import BaseModel
 
 
+class ResponseError(TypedDict):
+    """Error payload embedded inside a failed ``response`` object.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_error.ResponseError``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/codex-api/src/sse/responses.rs``
+        local ``Error`` struct (``{ code, message, … }`` inside
+        ``response.error``)
+
+    The ``code`` field drives the Codex client's error classification:
+    ``rate_limit_exceeded``, ``context_length_exceeded``,
+    ``insufficient_quota``, ``invalid_prompt``, ``cyber_policy``,
+    ``server_is_overloaded``, ``usage_not_included``.
+
+    Attributes:
+        code: Machine-readable error code (e.g. ``upstream_error``).
+              The OpenAI SDK uses a closed ``Literal`` union; Primal
+              Codex keeps it as ``str`` because upstream proxies may
+              return codes outside that set.
+        message: Human-readable description of the error.
+
+    """
+
+    code: str
+    message: str
+
+
+class ResponseUsage(TypedDict):
+    """Token usage embedded inside a completed ``response`` object.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_usage.ResponseUsage``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/codex-api/src/sse/responses`.rs``
+        ``ResponseCompletedUsage``
+        (``{ input_tokens, output_tokens, total_tokens }``)
+
+    The OpenAI SDK and Codex Rust client expect nested detail blocks
+    (``input_tokens_details`` / ``output_tokens_details``).  Primal
+    Codex **currently** omits those and may add a flat
+    ``reasoning_output_tokens`` key that Rust serde silently ignores.
+    This is a known gap to be fixed in a follow-up.
+
+    Attributes:
+        input_tokens: Number of input (prompt) tokens.
+        output_tokens: Number of output (completion) tokens.
+        total_tokens: Total tokens used (input + output).
+        input_tokens_details: Breakdown of input tokens (cached vs.
+            non-cached).  **Not yet emitted** — reserved for future
+            alignment with the OpenAI SDK / Codex client expectations.
+        output_tokens_details: Breakdown of output tokens (reasoning
+            vs. non-reasoning).  **Not yet emitted** — reserved for
+            future alignment.
+
+    """
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    input_tokens_details: NotRequired["ResponseUsageInputTokensDetails"]
+    output_tokens_details: NotRequired["ResponseUsageOutputTokensDetails"]
+
+
+class ResponseUsageInputTokensDetails(TypedDict):
+    """Nested detail for cached input tokens.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_usage.InputTokensDetails``
+
+    Attributes:
+        cached_tokens: Number of tokens retrieved from cache.
+
+    """
+
+    cached_tokens: int
+
+
+class ResponseUsageOutputTokensDetails(TypedDict):
+    """Nested detail for reasoning output tokens.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_usage.OutputTokensDetails``
+
+    Attributes:
+        reasoning_tokens: Number of reasoning tokens.
+
+    """
+
+    reasoning_tokens: int
+
+
+class Response(TypedDict):
+    """A model response object embedded inside SSE events.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response.Response``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/codex-api/src/sse/responses`.rs``
+        ``ResponseCompleted``
+        (``{ id, usage?, end_turn? }``)
+
+    The OpenAI SDK's ``Response`` model has ~35 fields.  Primal Codex
+    only ever serialises a **minimal subset** — just enough for the
+    Codex client to function.  Field presence varies by event:
+
+    * ``response.created``   → ``{ id }``
+    * ``response.completed`` → ``{ id, status, usage? }``
+    * ``response.failed``    → ``{ id, status, error }``
+
+    Attributes:
+        id: Unique identifier for this response (e.g. ``resp_…``).
+            Required for every event that carries a ``response`` key.
+        status: Status of the response generation.
+            One of ``completed``, ``failed``, ``in_progress``,
+            ``cancelled``, ``queued``, or ``incomplete``.
+            Only present in completion/failure events.
+        error: Error object, present only when ``status == "failed"``.
+        usage: Token usage, present only in ``response.completed``.
+            The Codex Rust client accepts ``None`` / absent usage.
+        end_turn: Whether the model affirmatively ended its turn.
+            Primal Codex does **not** currently emit this field.
+            The Codex Rust client gracefully handles ``None``.
+
+    """
+
+    id: str
+    status: NotRequired[str]
+    error: NotRequired[ResponseError]
+    usage: NotRequired[ResponseUsage]
+    end_turn: NotRequired[bool]
+
+
+class ResponseOutputRefusal(TypedDict):
+    """A refusal content part inside a message item.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_output_refusal.ResponseOutputRefusal``
+
+    Attributes:
+        type: Discriminator.  Always ``"output_refusal"``.
+        refusal: The refusal message.
+
+    """
+
+    type: Literal["output_refusal"]
+    refusal: str
+
+
+class ResponseOutputText(TypedDict):
+    """A text content part inside a message item.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_output_text.ResponseOutputText``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ContentItem::OutputText``
+
+    Attributes:
+        type: Discriminator.  Always ``"output_text"``.
+        text: The text content.
+        annotations: Annotations (file/URL citations).  Not yet
+            emitted by Primal Codex.
+
+    """
+
+    type: Literal["output_text"]
+    text: str
+    annotations: NotRequired[list[Any]]
+
+
+ResponseOutputMessageContent: TypeAlias = ResponseOutputText | ResponseOutputRefusal
+"""Content part inside a message output item.
+
+Reference — OpenAI SDK:
+    ``openai.types.responses.response_output_message.Content``
+    (``ResponseOutputText | ResponseOutputRefusal``)
+
+.. note::
+   Primal Codex currently only emits ``ResponseOutputText``.
+   ``ResponseOutputRefusal`` is defined here for spec completeness.
+"""
+
+
+class ResponseOutputMessage(TypedDict):
+    """An ``assistant`` message inside a ``response.output_item.*`` event.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_output_message.ResponseOutputMessage``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::Message``
+        (``{ role, content, phase? }`` — the local ``id`` is
+        ``#[serde(skip_serializing)]`` so it is **not** sent on the wire)
+
+    Attributes:
+        id: Item identifier (e.g. ``msg_…``).  The Codex Rust struct
+            annotates ``id`` with ``#[serde(skip_serializing)]``,
+            meaning it is **read** from the ``item.id`` field in the
+            JSON but **not re-serialised** by Rust.  Primal Codex
+            includes it unconditionally so the client can consume it.
+        type: Discriminator.  Always ``"message"``.
+        role: Message role.  Always ``"assistant"`` for output items.
+        content: List of content parts (text, potentially
+            images/refusals).
+        status: Status of the message.  Not yet emitted by
+            Primal Codex.  The OpenAI SDK requires this; the Codex
+            Rust client treats it as optional.
+        phase: Labels an assistant message as commentary or final
+            answer.  Not yet emitted by Primal Codex.  The Codex
+            Rust client accepts ``None``.
+
+    """
+
+    id: str
+    type: Literal["message"]
+    role: Literal["assistant"]
+    content: list[ResponseOutputMessageContent]
+    status: NotRequired[Literal["in_progress", "completed", "incomplete"]]
+    phase: NotRequired[Literal["commentary", "final_answer"]]
+
+
+class ResponseReasoningItemSummary(TypedDict):
+    """A single summary text part inside a reasoning item.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ReasoningItemReasoningSummary::SummaryText``
+
+    Attributes:
+        type: Discriminator.  Always ``"summary_text"``.
+        text: The summary text.
+
+    """
+
+    type: Literal["summary_text"]
+    text: str
+
+
+class ResponseReasoningItemContent(TypedDict):
+    """A single content part inside a reasoning item.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ReasoningItemContent``
+
+    Attributes:
+        type: Discriminator.  One of ``"reasoning_text"`` or
+            ``"text"``.
+        text: The content text.
+
+    """
+
+    type: Literal["reasoning_text", "text"]
+    text: str
+
+
+class ResponseReasoningItem(TypedDict):
+    """A reasoning item produced by the model.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_reasoning_item.ResponseReasoningItem``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::Reasoning``
+        (``{ summary, content?, encrypted_content? }`` — the
+        local ``id`` is ``#[serde(skip_serializing)]``)
+
+    Attributes:
+        id: Item identifier (e.g. ``rs_…``).
+        type: Discriminator.  Always ``"reasoning"``.
+        summary: List of reasoning summary text parts.
+        content: Full reasoning content parts.  Not yet emitted
+            by Primal Codex.
+        encrypted_content: Encrypted content.  Not yet emitted
+            by Primal Codex.
+
+    """
+
+    id: str
+    type: Literal["reasoning"]
+    summary: list[ResponseReasoningItemSummary]
+    content: NotRequired[list[ResponseReasoningItemContent]]
+    encrypted_content: NotRequired[str]
+
+
+class WebSearchAction(TypedDict):
+    """Action payload inside a ``WebSearchCall`` item.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``WebSearchAction``
+
+    Attributes:
+        type: Discriminator.
+            ``"search"`` / ``"open_page"`` / ``"find_in_page"``.
+        query: Search query (when type is ``"search"``).
+        url: URL to open or search in (when type is
+            ``"open_page"`` or ``"find_in_page"``).
+        pattern: Pattern to find (when type is
+            ``"find_in_page"``).
+
+    """
+
+    type: str
+    query: NotRequired[str]
+    url: NotRequired[str]
+    pattern: NotRequired[str]
+
+
+class ResponseWebSearchCall(TypedDict):
+    """A web search call item emitted by the Responses API.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::WebSearchCall``
+
+    Attributes:
+        id: Item identifier (e.g. ``ws_…``).
+        type: Discriminator.  Always ``"web_search_call"``.
+        status: Status of the web search call.
+        action: The search action (query, open page, etc.).
+
+    """
+
+    id: str
+    type: Literal["web_search_call"]
+    status: str
+    action: NotRequired[WebSearchAction]
+
+
+class ResponseFunctionToolCall(TypedDict):
+    """A function tool call item.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_function_tool_call.ResponseFunctionToolCall``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::FunctionCall``
+        (``{ name, namespace?, arguments, call_id }``)
+
+    Attributes:
+        id: Item identifier (e.g. ``fc_…``).
+        type: Discriminator.  Always ``"function_call"``.
+        name: Name of the function to call.
+        call_id: Identifier for this specific call instance.
+        arguments: JSON string of arguments.
+        namespace: Optional namespace for the function.
+
+    """
+
+    id: str
+    type: Literal["function_call"]
+    name: str
+    call_id: str
+    arguments: str
+    namespace: NotRequired[str]
+
+
+class FunctionCallOutputContentItem(TypedDict):
+    """A structured content item inside a function call output.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``FunctionCallOutputContentItem``
+
+    Attributes:
+        type: Discriminator.  ``"input_text"`` or ``"input_image"``.
+        text: Text content (when type is ``"input_text"``).
+        image_url: Image URL (when type is ``"input_image"``).
+        detail: Image detail level (when type is
+            ``"input_image"``).
+
+    """
+
+    type: Literal["input_text", "input_image"]
+    text: NotRequired[str]
+    image_url: NotRequired[str]
+    detail: NotRequired[Literal["auto", "low", "high", "original"]]
+
+
+class ResponseFunctionToolCallOutputItem(TypedDict):
+    """Output of a function tool call.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_function_tool_call_output_item.ResponseFunctionToolCallOutputItem``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::FunctionCallOutput``
+        (``{ call_id, output }``)
+
+    Attributes:
+        type: Discriminator.  Always ``"function_call_output"``.
+        call_id: Matches the ``call_id`` of the corresponding
+            ``ResponseFunctionToolCall``.
+        output: Output content — either a plain string or a list
+            of structured content items.
+
+    """
+
+    type: Literal["function_call_output"]
+    call_id: str
+    output: str | list[FunctionCallOutputContentItem]
+
+
+class ResponseCustomToolCall(TypedDict):
+    """A custom tool call item.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::CustomToolCall``
+        (``{ call_id, name, input }``)
+
+    Attributes:
+        id: Item identifier.
+        type: Discriminator.  Always ``"custom_tool_call"``.
+        call_id: Identifier for this specific call instance.
+        name: Name of the custom tool.
+        input: Raw input string.
+        status: Status of the tool call.
+
+    """
+
+    id: str
+    type: Literal["custom_tool_call"]
+    call_id: str
+    name: str
+    input: str
+    status: NotRequired[str]
+
+
+class ResponseCustomToolCallOutputItem(TypedDict):
+    """Output of a custom tool call.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::CustomToolCallOutput``
+        (``{ call_id, name?, output }``)
+
+    Attributes:
+        type: Discriminator.  Always ``"custom_tool_call_output"``.
+        call_id: Matches the ``call_id`` of the corresponding
+            ``ResponseCustomToolCall``.
+        output: Output content.
+        name: Optional tool name.
+
+    """
+
+    type: Literal["custom_tool_call_output"]
+    call_id: str
+    output: str | list[FunctionCallOutputContentItem]
+    name: NotRequired[str]
+
+
+class ResponseToolSearchCall(TypedDict):
+    """A tool search call item.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::ToolSearchCall``
+        (``{ call_id?, status?, execution, arguments }``)
+
+    Attributes:
+        id: Item identifier.
+        type: Discriminator.  Always ``"tool_search_call"``.
+        call_id: Identifier for this specific call instance.
+        execution: Execution mode (``"client"`` or ``"server"``).
+        arguments: Search arguments as a JSON object.
+        status: Status of the search call.
+
+    """
+
+    id: str
+    type: Literal["tool_search_call"]
+    call_id: str
+    execution: str
+    arguments: Any
+    status: NotRequired[str]
+
+
+class ResponseToolSearchOutputItem(TypedDict):
+    """Output of a tool search call.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::ToolSearchOutput``
+        (``{ call_id?, status, execution, tools }``)
+
+    Attributes:
+        type: Discriminator.  Always ``"tool_search_output"``.
+        call_id: Matches the ``call_id`` of the corresponding
+            ``ResponseToolSearchCall``.
+        status: Status of the search output.
+        execution: Execution mode.
+        tools: List of tools found.
+
+    """
+
+    type: Literal["tool_search_output"]
+    call_id: str
+    status: str
+    execution: str
+    tools: list[Any]
+
+
+class ResponseImageGenerationCall(TypedDict):
+    """An image generation call item.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::ImageGenerationCall``
+        (``{ id, status, result, revised_prompt? }``)
+
+    Attributes:
+        id: Item identifier (e.g. ``ig_…``).
+        type: Discriminator.  Always ``"image_generation_call"``.
+        status: Status (e.g. ``"completed"``).
+        result: The generated image encoded in base64.
+        revised_prompt: The revised/upsampled prompt used.
+
+    """
+
+    id: str
+    type: Literal["image_generation_call"]
+    status: str
+    result: str
+    revised_prompt: NotRequired[str]
+
+
+class LocalShellAction(TypedDict):
+    """Action payload inside a ``LocalShellCall`` item.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``LocalShellAction``
+
+    Attributes:
+        type: Discriminator.  Always ``"exec"``.
+        command: The command to run as a list of arguments.
+        timeout_ms: Optional timeout in milliseconds.
+        working_directory: Optional working directory.
+        env: Optional environment variables.
+        user: Optional user to run as.
+
+    """
+
+    type: Literal["exec"]
+    command: list[str]
+    timeout_ms: NotRequired[int]
+    working_directory: NotRequired[str]
+    env: NotRequired[dict[str, str]]
+    user: NotRequired[str]
+
+
+class ResponseLocalShellCall(TypedDict):
+    """A local shell tool call item.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::LocalShellCall``
+        (``{ call_id?, status, action }``)
+
+    Attributes:
+        id: Item identifier.
+        type: Discriminator.  Always ``"local_shell_call"``.
+        call_id: Identifier for this specific call instance.
+        status: Status (``"in_progress"``, ``"completed"``,
+            ``"incomplete"``).
+        action: The shell action (command to execute).
+
+    """
+
+    id: str
+    type: Literal["local_shell_call"]
+    call_id: str
+    status: Literal["in_progress", "completed", "incomplete"]
+    action: LocalShellAction
+
+
+class ResponseCompactionItem(TypedDict):
+    """A compaction (summarised) item.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::Compaction``
+        (``{ encrypted_content }``)
+
+    Attributes:
+        type: Discriminator.  Always ``"compaction"``.
+        encrypted_content: Encrypted summary content.
+
+    """
+
+    type: Literal["compaction"]
+    encrypted_content: str
+
+
+class ResponseContextCompactionItem(TypedDict):
+    """A context compaction item.
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem::ContextCompaction``
+        (``{ encrypted_content? }``)
+
+    Attributes:
+        type: Discriminator.  Always ``"context_compaction"``.
+        encrypted_content: Encrypted content.
+
+    """
+
+    type: Literal["context_compaction"]
+    encrypted_content: NotRequired[str]
+
+
+ResponseOutputItem: TypeAlias = (
+    ResponseOutputMessage
+    | ResponseReasoningItem
+    | ResponseFunctionToolCall
+    | ResponseFunctionToolCallOutputItem
+    | ResponseWebSearchCall
+    | ResponseImageGenerationCall
+    | ResponseLocalShellCall
+    | ResponseToolSearchCall
+    | ResponseToolSearchOutputItem
+    | ResponseCustomToolCall
+    | ResponseCustomToolCallOutputItem
+    | ResponseCompactionItem
+    | ResponseContextCompactionItem
+)
+"""An output item in a ``response.output_item.*`` event.
+
+Reference — OpenAI SDK:
+    ``openai.types.responses.response_output_item.ResponseOutputItem``
+    (25-variant union)
+
+Reference — Codex Rust:
+    ``external/codex/codex-rs/protocol/src/models`.rs``
+        ``ResponseItem``
+    (tagged enum with 14+ variants)
+
+.. note::
+   Primal Codex currently only emits ``ResponseOutputMessage``.
+   All other variants are defined here for spec completeness and
+   will be emitted as functionality expands.
+"""
+
+
+class ResponseCreatedEvent(TypedDict):
+    """Emitted when a response is created.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_created_event.ResponseCreatedEvent``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/codex-api/src/sse/responses`.rs``
+        ``process_responses_event``:
+        ``"response.created"`` → ``ResponseEvent::Created``
+        (the client only checks that ``response`` is ``Some``)
+
+    Attributes:
+        type: The event type discriminator.  Always
+            ``"response.created"``.
+        response: The response that was created.  The Codex Rust
+            client requires this field to exist, but only extracts
+            ``response.id`` indirectly via ``response.completed``.
+            A minimal ``{"id": …}`` suffices.
+
+    """
+
+    type: Literal["response.created"]
+    response: Response
+
+
+class ResponseOutputItemAddedEvent(TypedDict):
+    """Emitted when a new output item is added.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_output_item_added_event.ResponseOutputItemAddedEvent``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/codex-api/src/sse/responses`.rs``
+        ``process_responses_event``:
+        ``"response.output_item.added"`` →
+        ``ResponseEvent::OutputItemAdded(ResponseItem)``
+        (deserialises ``item`` as ``ResponseItem``)
+
+    Attributes:
+        type: The event type discriminator.  Always
+            ``"response.output_item.added"``.
+        item: The output item that was added.
+
+    """
+
+    type: Literal["response.output_item.added"]
+    item: ResponseOutputItem
+
+
+class ResponseTextDeltaEvent(TypedDict):
+    """Emitted when there is an additional text delta.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_text_delta_event.ResponseTextDeltaEvent``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/codex-api/src/sse/responses`.rs``
+        ``process_responses_event``:
+        ``"response.output_text.delta"`` → ``ResponseEvent::OutputTextDelta(String)``
+        (only the ``delta`` string is consumed)
+
+    Attributes:
+        type: The event type discriminator.  Always
+            ``"response.output_text.delta"``.
+        delta: The text delta that was added.
+
+    """
+
+    type: Literal["response.output_text.delta"]
+    delta: str
+
+
+class ResponseTextDoneEvent(TypedDict):
+    """Emitted when text content is finalized.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_text_done_event.ResponseTextDoneEvent``
+
+    The Codex Rust client does **not** handle ``response.output_text.done``
+    explicitly — it relies on ``response.output_item.done`` carrying the
+    final ``content`` array.  This event is emitted for OpenAI SDK
+    compatibility but may be a no-op on the consumer side.
+
+    Attributes:
+        type: The event type discriminator.  Always
+            ``"response.output_text.done"``.
+        text: The final text content.
+
+    """
+
+    type: Literal["response.output_text.done"]
+    text: str
+
+
+class ResponseOutputItemDoneEvent(TypedDict):
+    """Emitted when an output item is marked done.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_output_item_done_event.ResponseOutputItemDoneEvent``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/codex-api/src/sse/responses`.rs``
+        ``process_responses_event``:
+        ``"response.output_item.done"`` →
+        ``ResponseEvent::OutputItemDone(ResponseItem)``
+        (deserialises ``item`` as ``ResponseItem``)
+
+    Attributes:
+        type: The event type discriminator.  Always
+            ``"response.output_item.done"``.
+        item: The output item that was marked done.
+
+    """
+
+    type: Literal["response.output_item.done"]
+    item: ResponseOutputItem
+
+
+class ResponseCompletedEvent(TypedDict):
+    """Emitted when the model response is complete.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_completed_event.ResponseCompletedEvent``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/codex-api/src/sse/responses`.rs``
+        ``process_responses_event``:
+        ``"response.completed"`` → ``ResponseEvent::Completed``
+        (deserialises ``response`` as ``ResponseCompleted { id, usage?, end_turn? }``)
+
+    Attributes:
+        type: The event type discriminator.  Always
+            ``"response.completed"``.
+        response: The completed response, minimally
+            ``{"id": …, "status": "completed"}``.
+            ``usage`` is included when upstream usage data is available.
+
+    """
+
+    type: Literal["response.completed"]
+    response: Response
+
+
+class ResponseFailedEvent(TypedDict):
+    """Emitted when a response fails.
+
+    Reference — OpenAI SDK:
+        ``openai.types.responses.response_failed_event.ResponseFailedEvent``
+
+    Reference — Codex Rust:
+        ``external/codex/codex-rs/codex-api/src/sse/responses`.rs``
+        ``process_responses_event``:
+        ``"response.failed"`` → extracts ``response.error.{code, message}``
+        and returns an ``ApiError`` variant.
+
+    Attributes:
+        type: The event type discriminator.  Always
+            ``"response.failed"``.
+        response: The failed response, must include
+            ``{"id": …, "status": "failed", "error": …}``.
+
+    """
+
+    type: Literal["response.failed"]
+    response: Response
+
+
+ResponseStreamEvent: TypeAlias = (
+    ResponseCreatedEvent
+    | ResponseOutputItemAddedEvent
+    | ResponseTextDeltaEvent
+    | ResponseTextDoneEvent
+    | ResponseOutputItemDoneEvent
+    | ResponseCompletedEvent
+    | ResponseFailedEvent
+)
+"""Union of all SSE event payloads that Primal Codex can emit.
+
+Reference — OpenAI SDK:
+    ``openai.types.responses.response_stream_event.ResponseStreamEvent``
+
+Reference — Codex Rust:
+    ``external/codex/codex-rs/codex-api/src/common`.rs``
+        ``ResponseEvent``
+"""
+
+
 class ResponsesApiRequest(BaseModel):
     """Wire-format mirror of the Codex client's ``ResponsesApiRequest``.
 
     This is **not** the standard OpenAI Responses API.
 
     The Codex client
-    (``<repo_root>/external/codex/codex-rs/codex-api/src/common.rs``)
+    (``external/codex/codex-rs/codex-api/src/common.rs``)
     serializes its own ``ResponsesApiRequest`` struct as JSON and sends
     it to the Primal Codex ``POST /responses`` endpoint.  This Pydantic
     model deserializes that same JSON.
 
     The OpenAI SDK's ``ResponseCreateParamsBase``
-    (``<repo_root>/.venv/lib/python3.11/site-packages/openai/types/
-    responses/response_create_params.py``) is the *spec* for OpenAI's
+    (``openai.types.responses.response_create_params.ResponseCreateParamsBase``)
+    is the *spec* for OpenAI's
     standard Responses API, but the Codex client does **not** send that
     wire format.  Instead it sends a subset of those fields (12 of 28)
     plus two Codex-specific ones:
@@ -218,34 +1074,6 @@ def _map_tools(body: ResponsesApiRequest) -> dict[str, Any]:
     return params
 
 
-def responses_to_chat_completions(
-    body: ResponsesApiRequest, model_id: str
-) -> dict[str, Any]:
-    """Map a ``ResponsesApiRequest`` to a Chat Completions request body.
-
-    The following Responses API fields have no Chat Completions equivalent
-    and are intentionally omitted:
-
-    * ``store`` — Responses API concept for persisting responses server-side.
-    * ``include`` — Responses API concept for requesting extra data in the
-      response envelope (e.g. token usage, model metadata). Use
-      ``stream_options.include_usage`` instead if needed.
-    * ``reasoning.summary`` — Requests the model to produce reasoning
-      summaries alongside its output. Chat Completions only supports
-      ``reasoning_effort``.
-    * ``client_metadata`` — Codex-internal tracing metadata (traceparent,
-      tracestate). Not passed to the upstream; could be forwarded as custom
-      HTTP headers if the upstream supports distributed tracing.
-    """
-    result: dict[str, Any] = {
-        "model": model_id,
-        "messages": _map_messages(body),
-        "stream": body.stream,
-        **_map_tools(body),
-    }
-    return result
-
-
 def _generate_response_id() -> str:
     """Generate a unique response ID.
 
@@ -305,24 +1133,6 @@ def _format_sse(event_name: str, data: dict[str, Any]) -> str:
     """Format a dict as an SSE ``event:`` / ``data:`` pair."""
     encoded = json.dumps(data, separators=(",", ":"))
     return f"event: {event_name}\ndata: {encoded}\n\n"
-
-
-def _stream_extra_kwargs(upstream_body: dict[str, Any]) -> dict[str, Any]:
-    """Extract optional parameters from the upstream body."""
-    kwargs: dict[str, Any] = {}
-    for key in (
-        "tools",
-        "tool_choice",
-        "parallel_tool_calls",
-        "reasoning_effort",
-        "service_tier",
-        "prompt_cache_key",
-        "verbosity",
-        "response_format",
-    ):
-        if key in upstream_body:
-            kwargs[key] = upstream_body[key]
-    return kwargs
 
 
 def _usage_from_chunk(
@@ -453,8 +1263,9 @@ async def relay_stream(
 ) -> AsyncIterator[str]:
     """Forward the mapped Chat Completions request using the OpenAI SDK."""
     response_id = _generate_response_id()
-    upstream_body = responses_to_chat_completions(body, model_id)
     item_id = _generate_message_item_id()
+    messages = _map_messages(body)
+    extra_kwargs = _map_tools(body)
 
     yield _format_sse(
         "response.created",
@@ -462,11 +1273,10 @@ async def relay_stream(
     )
 
     async with AsyncOpenAI(api_key=api_key, base_url=base_url) as client:
-        extra_kwargs = _stream_extra_kwargs(upstream_body)
         try:
             stream = await client.chat.completions.create(
-                model=upstream_body["model"],
-                messages=upstream_body["messages"],
+                model=model_id,
+                messages=messages,
                 stream=True,
                 stream_options={"include_usage": True},
                 **extra_kwargs,
