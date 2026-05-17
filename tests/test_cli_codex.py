@@ -267,3 +267,34 @@ class TestCodex:
         assert (
             cfg["model_providers"]["primal-codex"]["base_url"] == "http://0.0.0.0:9999"
         )
+
+    def test_codex_full_output_on_fresh_start(
+        self,
+        cli_runner: CliRunner,
+        tmp_codex_home: Path,
+        cli_env: dict[str, str],
+    ) -> None:
+        """Verify the exact full stdout when creating config from scratch."""
+        result = cli_runner.invoke(app, ["codex"], env=cli_env)
+
+        config_path = tmp_codex_home / "config.toml"
+        lines = result.stdout.strip().split("\n")
+
+        assert lines[0] == f"Updated Codex config at {config_path}"
+        assert lines[1] == (f"  Set model_provider = {PRIMAL_CODEX_PROVIDER_ID!r}")
+        assert lines[2] == (
+            f"  Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name"
+            f" = {PRIMAL_CODEX_PROVIDER_ID!r}"
+        )
+        assert lines[3] == (
+            f"  Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url"
+            " = 'http://127.0.0.1:8010'"
+        )
+        assert lines[4] == (
+            f"  Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.supports_websockets"
+            " = False (Primal Codex uses HTTP SSE streaming, not WebSocket)"
+        )
+        assert lines[5] == (
+            "  Removed model_catalog_json"
+            " (Primal Codex provides model discovery via /models)"
+        )
