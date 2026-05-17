@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from importlib.metadata import version
 from typing import Any
 
 import uvicorn
@@ -62,13 +63,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
     await app.state.ctx.relays.wait_all()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="Primal Codex",
+    summary="OpenAI Responses API to Chat Completions reverse proxy",
+    description=(
+        "Maps Codex Responses API requests to OpenAI-compatible Chat"
+        " Completions endpoints for open-source model providers."
+    ),
+    version=version("primal-codex"),
+    docs_url=None,
+    redoc_url=None,
+    lifespan=lifespan,
+)
 
 
-@app.get("/healthz")
+@app.get(
+    "/healthz",
+    summary="Health Check",
+    description="Returns a simple status to confirm the server is running.",
+    tags=["system"],
+)
 async def healthz() -> JSONResponse:
     """Health check endpoint."""
     return JSONResponse({"status": "ok"})
+
 
 @app.get(
     "/models",
@@ -77,6 +95,7 @@ async def healthz() -> JSONResponse:
         "Return metadata for all models discovered from configured providers."
     ),
     tags=["models"],
+    operation_id="list_models",
 )
 def models(request: Request) -> ModelsResponse:
     """List all models — reads from pre-computed model info."""
@@ -87,13 +106,17 @@ def models(request: Request) -> ModelsResponse:
 async def responses(
     request: Request,
 ) -> JSONResponse | StreamingResponse:
-    """Relay upstream responses as JSON or SSE."""
+    """Relay upstream responses as JSON or SSE.
+
+    Accepts an OpenAI Responses API request body and relays it to
+    the appropriate provider as a Chat Completions request.
+    """
     body = await request.json()
     stream = body.get("stream", False)
 
     # NOTE: placeholder; replace with actual upstream relay
     #   https://github.com/primal-codex/primal-codex/issues/1
-    _ = body  # use body.get("model") for model lookup
+    _ = body  # TODO(#1): use body.get('model') for model lookup
     if stream:
         ctx: AppContext = request.app.state.ctx
         relays: ActiveRelays = ctx.relays
