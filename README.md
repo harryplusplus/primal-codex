@@ -65,6 +65,9 @@ input_modalities = ["text"]
 
 ### 서버 API
 
+> `base_url` = `http://<server.host>:<server.port>`.
+> `<server.host>`, `<server.port>`는 설정 파일의 `[server]` 섹션 값을 따릅니다.
+
 #### 모델 목록 조회
 
 ```
@@ -79,8 +82,11 @@ Primal Codex의 구성 파일 -> 서버에서 일부 조건에 따라서 기본�
 이 순서로 모델 정보의 값이 채워집니다.
 어떤 필드를 구성할 수 있는지는 Primal Codex 구성 파일의 주석을 확인해주세요.
 
-어떤 모델 정보가 Codex로 전달되는지 확인을 원하는 경우,
-`http://<config.server.host>:<config.server.port>/models`를 요청해보세요.
+어떤 모델 정보가 Codex로 전달되는지 확인을 원하는 경우, 아래 API를 호출하세요.
+
+```bash
+curl <base_url>/models
+```
 
 #### LLM 요청
 
@@ -91,6 +97,10 @@ Codex 클라이언트 <-> Responses API (SSE /responses) <-> Primal Codex 서버
 Responses API 요청을 Chat Completions 요청으로 변환해 제공자로 전달합니다.
 Codex가 준 모델 slug는 `<provider_id>/<model_id>`로 분해해 올바른 제공자의 API를 호출합니다.
 
-#### (TODO) OpenAPI
+#### OpenAPI
 
-`<base_url>/openapi.json`과 같은 기능이 있어야 합니다. FastAPI 기능 확인을 해야합니다.
+API의 스펙을 확인하고 싶으실 경우, 아래 API를 호출하세요.
+
+```bash
+curl <base_url>/openapi.json
+```
