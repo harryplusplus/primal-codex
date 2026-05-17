@@ -113,19 +113,12 @@ class TestValidRequest:
     def test_content_type_is_event_stream(self, client: TestClient) -> None:
         """Respond with ``text/event-stream`` content type."""
         response = client.post("/responses", json=_valid_body())
-        assert response.headers.get("content-type") == "text/event-stream"
+        assert "text/event-stream" in response.headers.get("content-type", "")
 
     def test_stream_false_returns_400(self, client: TestClient) -> None:
         """Return 400 when ``stream`` is ``false``."""
         body = _valid_body()
         body["stream"] = False
-        response = client.post("/responses", json=body)
-        assert response.status_code == HTTPStatus.BAD_REQUEST
-
-    def test_no_stream_field_returns_400(self, client: TestClient) -> None:
-        """Return 400 when ``stream`` is omitted."""
-        body = _valid_body()
-        del body["stream"]
         response = client.post("/responses", json=body)
         assert response.status_code == HTTPStatus.BAD_REQUEST
 

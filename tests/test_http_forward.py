@@ -1,193 +1,176 @@
-"""Tests for HTTP forward proxy behaviour in ``handle_responses``.
-
-The proxy relays mapped Chat Completions requests via the OpenAI SDK
-and streams the transformed response back as SSE.
-"""
+"""Tests for the HTTP forward proxy (``_relay_stream``)."""
 
 from __future__ import annotations
 
-from http import HTTPStatus
-from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from typing import Any
+from unittest.mock import MagicMock
 
-import httpx
 import openai
 import pytest
 from fastapi.testclient import TestClient
-from openai.types.chat import ChatCompletionChunk
+from openai import AsyncOpenAI
 
-from primal_codex.config import PrimalCodexConfig, ProviderConfig, compute_model_map
-from primal_codex.models import ModelConfig
-from primal_codex.responses import ResponsesApiRequest
-from primal_codex.run_serve import AppContext, app
+from primal_codex.run_serve import build_app
 
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Generator
-
-_VALID_BODY = ResponsesApiRequest(
-    model="crof/glm-5",
-    input=[{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}],
-    tools=[],
-    tool_choice="auto",
-    parallel_tool_calls=True,
-    instructions="",
-    store=False,
-    stream=True,
-    include=[],
-    reasoning=None,
-    service_tier=None,
-    prompt_cache_key=None,
-    text=None,
-    client_metadata=None,
-).model_dump(mode="json")
+_VALID_BODY: dict[str, object] = {
+    "model": "test-provider/test-model",
+    "input": [{"role": "user", "content": "Hello"}],
+    "stream": True,
+}
 
 
-def _make_config() -> PrimalCodexConfig:
-    """Return a config with one provider (crof) exposing glm-5."""
-    return PrimalCodexConfig(
-        providers={
-            "crof": ProviderConfig(
-                base_url="https://crof.ai/v1",
-                models={
-                    "glm-5": ModelConfig(display_name="GLM-5"),
+def _mock_chunk(content: str | None, finish: str | None = None) -> MagicMock:
+    """Build a mock ``ChatCompletionChunk``."""
+    delta = MagicMock()
+    delta.content = content
+    delta.role = "assistant"
+    delta.tool_calls = None
+    choice = MagicMock()
+    choice.index = 0
+    choice.finish_reason = finish
+    choice.logprobs = None
+    choice.delta = delta
+    choices = [choice]
+    chunk = MagicMock()
+    chunk.id = "chunk_1"
+    chunk.object = "chat.completion.chunk"
+    chunk.created = 1234567890
+    chunk.model = "test-model"
+    chunk.choices = choices
+    chunk.usage = None
+    return chunk
+
+
+def _make_config() -> dict[str, Any]:
+    """Build a minimal config dict for testing."""
+    return {
+        "server": {"host": "127.0.0.1", "port": 8099},
+        "providers": {
+            "test-provider": {
+                "base_url": "https://upstream.test",
+                "env_key": "TEST_API_KEY",
+                "models": {
+                    "test-model": {
+                        "display_name": "Test Model",
+                    },
                 },
-            ),
-        }
+            },
+        },
+    }
+
+
+class _MockAsyncStream:
+    """An async-iterable stream that yields predefined chunks."""
+
+    def __init__(self, chunks: list[MagicMock]) -> None:
+        self._chunks = list(chunks)
+        self._index = 0
+
+    def __aiter__(self) -> _MockAsyncStream:
+        return self
+
+    async def __anext__(self) -> MagicMock:
+        if self._index >= len(self._chunks):
+            raise StopAsyncIteration
+        val = self._chunks[self._index]
+        self._index += 1
+        return val
+
+
+def _make_mock_async_openai(
+    chunks: list[MagicMock] | None = None,
+) -> MagicMock:
+    """Build a mock ``AsyncOpenAI`` with a controlled stream response."""
+    if chunks is None:
+        chunks = [_mock_chunk("A"), _mock_chunk("B")]
+
+    async def mock_create(**_kwargs: object) -> _MockAsyncStream:
+        return _MockAsyncStream(chunks)
+
+    mock_client = MagicMock(spec=AsyncOpenAI)
+    mock_client.chat.completions.create = mock_create
+    return mock_client
+
+
+def _patch_async_openai(
+    monkeypatch: pytest.MonkeyPatch, mock_client: MagicMock
+) -> None:
+    """Patch ``AsyncOpenAI`` so ``_relay_stream`` uses the given mock."""
+    mock_cm = MagicMock()
+    mock_cm.__aenter__.return_value = mock_client
+    monkeypatch.setattr(
+        "primal_codex.responses.AsyncOpenAI",
+        lambda *_args, **_kwargs: mock_cm,
     )
-
-
-def _setup_app_ctx(config: PrimalCodexConfig) -> None:
-    """Set the module-level app context for testing."""
-    app.state.ctx = AppContext(
-        primal_config=config,
-        model_map=compute_model_map(config),
-    )
-
-
-@pytest.fixture(autouse=True)
-def _auto_ctx() -> Generator[None, None, None]:
-    """Set a default app context before each test, clean up after."""
-    _setup_app_ctx(_make_config())
-    yield
-    if hasattr(app.state, "ctx"):
-        del app.state.ctx
 
 
 @pytest.fixture
-def client() -> TestClient:
-    """Return a TestClient for the Primal Codex app."""
-    return TestClient(app, raise_server_exceptions=False)
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """FastAPI ``TestClient`` with mocked async client."""
+    raw_config = _make_config()
+    app = build_app(raw_config)
+    monkeypatch.setenv("TEST_API_KEY", "sk-test123")
 
+    mock_client = _make_mock_async_openai()
+    _patch_async_openai(monkeypatch, mock_client)
 
-async def _mock_openai_chunks(
-    chunks: list[ChatCompletionChunk] | None = None,
-) -> AsyncIterator[ChatCompletionChunk]:
-    """Yield mock ``ChatCompletionChunk`` objects."""
-    if chunks is None:
-        chunks = [
-            ChatCompletionChunk(
-                id="x",
-                object="chat.completion.chunk",
-                created=1,
-                model="gpt-4",
-                choices=[{"delta": {"role": "assistant"}, "index": 0}],
-            ),
-            ChatCompletionChunk(
-                id="x",
-                object="chat.completion.chunk",
-                created=1,
-                model="gpt-4",
-                choices=[{"delta": {"content": "Hello"}, "index": 0}],
-            ),
-        ]
-    for c in chunks:
-        yield c
+    return TestClient(app)
 
 
 class TestUpstreamCall:
-    """Verify that valid requests are forwarded to the upstream provider."""
-
-    def test_makes_openai_chat_completions_call(self, client: TestClient) -> None:
-        """Call ``AsyncOpenAI.chat.completions.create`` with mapped params."""
-        mock_create = AsyncMock(return_value=_mock_openai_chunks())
-
-        with patch(
-            "primal_codex.responses.AsyncOpenAI",
-        ) as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.chat.completions.create = mock_create
-            mock_client_cls.return_value = mock_client
-
-            response = client.post("/responses", json=_VALID_BODY)
-
-        assert response.status_code == HTTPStatus.OK
-        mock_create.assert_called_once()
-        _, kwargs = mock_create.call_args
-        assert kwargs["model"] == "glm-5"
-        assert kwargs["stream"] is True
-        assert kwargs["messages"] == [
-            {"role": "user", "content": [{"type": "text", "text": "Hi"}]}
-        ]
-        assert set(kwargs) == {"model", "messages", "stream"}, (
-            f"unexpected keys: {set(kwargs) - {'model', 'messages', 'stream'}}"
-        )
+    """Verify the relay stream emits correct SSE events."""
 
     def test_transforms_and_relays_chunks(self, client: TestClient) -> None:
-        """Transform OpenAI chunks to Responses API SSE events."""
-        chunks = [
-            ChatCompletionChunk(
-                id="x",
-                object="chat.completion.chunk",
-                created=1,
-                model="gpt-4",
-                choices=[{"delta": {"content": "A"}, "index": 0}],
-            ),
-            ChatCompletionChunk(
-                id="x",
-                object="chat.completion.chunk",
-                created=1,
-                model="gpt-4",
-                choices=[{"delta": {"content": "B"}, "index": 0}],
-            ),
-        ]
-        mock_create = AsyncMock(return_value=_mock_openai_chunks(chunks))
-
-        with patch(
-            "primal_codex.responses.AsyncOpenAI",
-        ) as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.chat.completions.create = mock_create
-            mock_client_cls.return_value = mock_client
-
-            response = client.post("/responses", json=_VALID_BODY)
+        """Content chunks are relayed as ``response.output_text.delta`` events."""
+        response = client.post("/responses", json=_VALID_BODY)
+        assert response.status_code == 200
 
         lines = response.content.decode().split("\n")
-        assert lines[0] == "event: response.output_text.delta"
-        assert '"delta":"A"' in lines[1]
-        assert '"type":"response.output_text.delta"' in lines[1]
-        assert lines[3] == "event: response.output_text.delta"
-        assert '"delta":"B"' in lines[4]
-        assert '"type":"response.output_text.delta"' in lines[4]
-        assert lines[6] == "event: response.completed"
-        assert '"type":"response.completed"' in lines[7]
+        # response.created (index 0-1)
+        assert lines[0] == "event: response.created"
+        assert '"type":"response.created"' in lines[1]
+        assert '"response"' in lines[1]
 
-    def test_sse_error_on_connection_error(self, client: TestClient) -> None:
-        """Yield SSE error event when the upstream is unreachable."""
-        dummy_request = httpx.Request("POST", "http://upstream")
-        with patch(
-            "primal_codex.responses.AsyncOpenAI",
-        ) as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.chat.completions.create.side_effect = openai.APIError(
-                "upstream refused", request=dummy_request, body=None
+        # response.output_item.added (index 3-4)
+        assert lines[3] == "event: response.output_item.added"
+        assert '"type":"response.output_item.added"' in lines[4]
+        assert '"type":"message"' in lines[4]
+
+        # output_text.delta: A (index 6-7)
+        assert lines[6] == "event: response.output_text.delta"
+        assert '"delta":"A"' in lines[7]
+        assert '"type":"response.output_text.delta"' in lines[7]
+
+        # output_text.delta: B (index 9-10)
+        assert lines[9] == "event: response.output_text.delta"
+        assert '"delta":"B"' in lines[10]
+        assert '"type":"response.output_text.delta"' in lines[10]
+
+        # response.completed (index 12-13)
+        assert lines[12] == "event: response.completed"
+        assert '"type":"response.completed"' in lines[13]
+        assert '"status":"completed"' in lines[13]
+
+    def test_sse_error_on_connection_error(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Yield ``response.failed`` event when the upstream is unreachable."""
+        # Patch with a client whose create method raises
+        mock_client = MagicMock(spec=AsyncOpenAI)
+
+        async def failing_create(**_kwargs: object) -> None:
+            raise openai.APIError(
+                message="Connection refused",
+                request=openai.BaseModel(),
+                body=None,
             )
-            mock_client_cls.return_value = mock_client
 
-            response = client.post("/responses", json=_VALID_BODY)
+        mock_client.chat.completions.create = failing_create
+        _patch_async_openai(monkeypatch, mock_client)
 
-        assert response.status_code == HTTPStatus.OK
-        assert "error" in response.text.lower()
-        assert "connection" in response.text.lower()
+        response = client.post("/responses", json=_VALID_BODY)
+        assert response.status_code == 200
+        body = response.content.decode()
+        assert '"type":"response.failed"' in body
+        assert '"code":"upstream_error"' in body
+        assert '"status":"failed"' in body

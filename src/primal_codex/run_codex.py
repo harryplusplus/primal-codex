@@ -90,6 +90,7 @@ def run_codex() -> None:
     entry = providers.setdefault(PRIMAL_CODEX_PROVIDER_ID, {})
     entry["name"] = PRIMAL_CODEX_PROVIDER_ID
     entry["base_url"] = server_url
+    entry["supports_websockets"] = False
 
     codex_path.parent.mkdir(parents=True, exist_ok=True)
     codex_path.write_text(tomlkit.dumps(doc), encoding="utf-8")

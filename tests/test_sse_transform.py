@@ -1,92 +1,81 @@
-"""Tests for Chat Completions → Responses API SSE transformation."""
+"""Tests for the SSE event transformation in the responses proxy."""
 
 from __future__ import annotations
 
+from typing import Any
+from unittest.mock import MagicMock
+
 from openai.types.chat import ChatCompletionChunk
+from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 
-from primal_codex.responses import (
-    _build_text_delta_event,
-    _build_text_done_event,
-    _format_sse,
-)
+from primal_codex.responses import _usage_from_chunk
 
 
-def _chunk(
-    content: str | None = None, finish: str | None = None
+def _make_chunk(
+    content: str | None = None,
+    finish_reason: str | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> ChatCompletionChunk:
-    """Build a ``ChatCompletionChunk`` with one choice."""
-    return ChatCompletionChunk(
-        id="x",
+    """Build a minimal ``ChatCompletionChunk`` for testing."""
+    delta = ChoiceDelta(content=content, role="assistant", tool_calls=None)
+    choices = [Choice(index=0, delta=delta, finish_reason=finish_reason, logprobs=None)]
+    usage_obj: object | None = None
+    if usage:
+        usage_mock = MagicMock()
+        usage_mock.prompt_tokens = usage.get("prompt_tokens", 0)
+        usage_mock.completion_tokens = usage.get("completion_tokens", 0)
+        usage_mock.total_tokens = usage.get("total_tokens", 0)
+        completion_details = MagicMock()
+        completion_details.reasoning_tokens = usage.get("completion_reasoning_tokens")
+        usage_mock.completion_tokens_details = completion_details
+        usage_obj = usage_mock
+    return MagicMock(
+        id="chunk_abc",
         object="chat.completion.chunk",
-        created=1,
-        model="gpt-4",
-        choices=[{"delta": {"content": content}, "index": 0, "finish_reason": finish}],
+        created=1234567890,
+        model="test-model",
+        choices=choices,
+        usage=usage_obj,
+        spec=ChatCompletionChunk,
     )
 
 
-class TestBuildTextDeltaEvent:
-    """Build ``response.output_text.delta`` events via SDK types."""
+class TestUsageFromChunk:
+    """Extract usage info from a chunk."""
 
-    def test_content_delta(self) -> None:
-        """Create a delta event with content."""
-        event = _build_text_delta_event("Hello", "item_abc", 1)
-        assert event.type == "response.output_text.delta"
-        assert event.delta == "Hello"
-        assert event.item_id == "item_abc"
-        assert event.sequence_number == 1
-        assert event.content_index == 0
-        assert event.output_index == 0
-        assert event.logprobs == []
+    def test_no_usage_returns_none(self) -> None:
+        """A chunk without usage returns ``None``."""
+        chunk = _make_chunk(content="hello", usage=None)
+        assert _usage_from_chunk(chunk) is None
 
-    def test_sse_format(self) -> None:
-        """Format the event as SSE."""
-        event = _build_text_delta_event("A", "item_1", 2)
-        sse = _format_sse("response.output_text.delta", event.model_dump(mode="json"))
-        assert sse.startswith("event: response.output_text.delta\n")
-        assert '"delta":"A"' in sse
-        assert '"type":"response.output_text.delta"' in sse
-
-
-class TestBuildTextDoneEvent:
-    """Build ``response.output_text.done`` events via SDK types."""
-
-    def test_done_event(self) -> None:
-        """Create a done event with final text."""
-        event = _build_text_done_event("Hello world", "item_abc", 3)
-        assert event.type == "response.output_text.done"
-        assert event.text == "Hello world"
-        assert event.item_id == "item_abc"
-        assert event.sequence_number == 3
-
-    def test_sse_format(self) -> None:
-        """Format the done event as SSE."""
-        event = _build_text_done_event("Done", "item_1", 4)
-        sse = _format_sse("response.output_text.done", event.model_dump(mode="json"))
-        assert sse.startswith("event: response.output_text.done\n")
-        assert '"text":"Done"' in sse
-        assert '"type":"response.output_text.done"' in sse
-
-
-class TestTransformOpenaiChunk:
-    """Inline stream processing logic (reused by ``_relay_stream``)."""
-
-    def test_role_only_chunk_skipped(self) -> None:
-        """Skip chunks that only set ``role: assistant`` (content is ``None``)."""
-        chunk = _chunk(content=None)
-        assert not (chunk.choices and chunk.choices[0].delta.content)
-
-    def test_content_takes_precedence_over_finish(self) -> None:
-        """Content triggers delta even when finish_reason is present."""
-        chunk = _chunk(content="Bye", finish="stop")
-        assert chunk.choices[0].delta.content is not None
-
-    def test_empty_choices_returns_none(self) -> None:
-        """No processing when there are no choices."""
-        chunk = ChatCompletionChunk(
-            id="x",
-            object="chat.completion.chunk",
-            created=1,
-            model="gpt-4",
-            choices=[],
+    def test_basic_usage_extracted(self) -> None:
+        """Basic prompt/completion/total tokens are extracted."""
+        chunk = _make_chunk(
+            content="hello",
+            usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
         )
-        assert not chunk.choices
+        result = _usage_from_chunk(chunk)
+        assert result == {
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "total_tokens": 30,
+        }
+
+    def test_reasoning_tokens_included(self) -> None:
+        """Reasoning tokens are included when present."""
+        chunk = _make_chunk(
+            content="hello",
+            usage={
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30,
+                "completion_reasoning_tokens": 5,
+            },
+        )
+        result = _usage_from_chunk(chunk)
+        assert result == {
+            "input_tokens": 10,
+            "output_tokens": 20,
+            "total_tokens": 30,
+            "reasoning_output_tokens": 5,
+        }

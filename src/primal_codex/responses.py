@@ -2,7 +2,6 @@
 
 import json
 import os
-import time
 from collections.abc import AsyncIterator
 from http import HTTPStatus
 from typing import Any
@@ -10,10 +9,11 @@ from typing import Any
 import openai
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, AsyncStream
 from openai.types.chat.chat_completion_assistant_message_param import (
     ChatCompletionAssistantMessageParam,
 )
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 from openai.types.chat.chat_completion_content_part_image_param import (
     ChatCompletionContentPartImageParam,
     ImageURL,
@@ -43,37 +43,36 @@ from openai.types.chat.chat_completion_user_message_param import (
     ChatCompletionUserMessageParam,
 )
 from openai.types.responses.easy_input_message import EasyInputMessage
-from openai.types.responses.response import Response as OpenAIResponse
-from openai.types.responses.response_completed_event import ResponseCompletedEvent
-from openai.types.responses.response_error_event import ResponseErrorEvent
 from openai.types.responses.response_format_text_json_schema_config import (
     ResponseFormatTextJSONSchemaConfig,
 )
 from openai.types.responses.response_input_content import ResponseInputContent
 from openai.types.responses.response_text_config import ResponseTextConfig
-from openai.types.responses.response_text_delta_event import ResponseTextDeltaEvent
-from openai.types.responses.response_text_done_event import ResponseTextDoneEvent
 from openai.types.shared.reasoning import Reasoning
 from pydantic import BaseModel, ValidationError
 
 
 class ResponsesApiRequest(BaseModel):
-    """Pydantic model matching the Codex ``ResponsesApiRequest``."""
+    """Pydantic model matching the Codex ``ResponsesApiRequest``.
+
+    All ``Optional`` Rust fields (``Option<T>``) default to ``None``.
+    Required fields (``model``, ``input``) have no default.
+    """
 
     model: str
-    instructions: str
     input: list[EasyInputMessage]
-    tools: list[Any]
-    tool_choice: str
-    parallel_tool_calls: bool
-    reasoning: Reasoning | None
-    store: bool
-    stream: bool
-    include: list[str]
-    service_tier: str | None
-    prompt_cache_key: str | None
-    text: ResponseTextConfig | None
-    client_metadata: dict[str, str] | None
+    instructions: str = ""
+    tools: list[Any] = []
+    tool_choice: str = "auto"
+    parallel_tool_calls: bool = True
+    reasoning: Reasoning | None = None
+    store: bool = False
+    stream: bool = True
+    include: list[str] = []
+    service_tier: str | None = None
+    prompt_cache_key: str | None = None
+    text: ResponseTextConfig | None = None
+    client_metadata: dict[str, str] | None = None
 
 
 def _map_content_part(
@@ -266,7 +265,11 @@ async def handle_responses(request: Request) -> JSONResponse | StreamingResponse
 
     return StreamingResponse(
         _relay_stream(body, provider.base_url, api_key, response_id),
-        headers={"content-type": "text/event-stream"},
+        media_type="text/event-stream",
+        headers={
+            "cache-control": "no-cache",
+            "x-accel-buffering": "no",
+        },
     )
 
 
@@ -277,56 +280,146 @@ def _random_hex(bytes_count: int) -> str:
 
 def _format_sse(event_name: str, data: dict[str, Any]) -> str:
     """Format a dict as an SSE ``event:`` / ``data:`` pair."""
-    return f"event: {event_name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
+    encoded = json.dumps(data, separators=(",", ":"))
+    return f"event: {event_name}\ndata: {encoded}\n\n"
 
 
-def _build_text_delta_event(
-    content: str, item_id: str, seq: int
-) -> ResponseTextDeltaEvent:
-    """Build a ``response.output_text.delta`` event."""
-    return ResponseTextDeltaEvent(
-        type="response.output_text.delta",
-        delta=content,
-        content_index=0,
-        item_id=item_id,
-        logprobs=[],
-        output_index=0,
-        sequence_number=seq,
-    )
+def _stream_extra_kwargs(upstream_body: dict[str, Any]) -> dict[str, Any]:
+    """Extract optional parameters from the upstream body."""
+    kwargs: dict[str, Any] = {}
+    for key in (
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "reasoning_effort",
+        "service_tier",
+        "prompt_cache_key",
+        "verbosity",
+        "response_format",
+    ):
+        if key in upstream_body:
+            kwargs[key] = upstream_body[key]
+    return kwargs
 
 
-def _build_text_done_event(text: str, item_id: str, seq: int) -> ResponseTextDoneEvent:
-    """Build a ``response.output_text.done`` event."""
-    return ResponseTextDoneEvent(
-        type="response.output_text.done",
-        content_index=0,
-        item_id=item_id,
-        logprobs=[],
-        output_index=0,
-        sequence_number=seq,
-        text=text,
-    )
+def _usage_from_chunk(
+    chunk: ChatCompletionChunk,
+) -> dict[str, object] | None:
+    """Extract usage info from a chunk if present."""
+    if not chunk.usage:
+        return None
+    u = chunk.usage
+    usage: dict[str, object] = {
+        "input_tokens": u.prompt_tokens,
+        "output_tokens": u.completion_tokens,
+        "total_tokens": u.total_tokens,
+    }
+    if u.completion_tokens_details and u.completion_tokens_details.reasoning_tokens:
+        usage["reasoning_output_tokens"] = u.completion_tokens_details.reasoning_tokens
+    return usage
 
 
-def _build_completed_event(
-    body: ResponsesApiRequest, model: str, response_id: str, seq: int
-) -> ResponseCompletedEvent:
-    """Build a ``response.completed`` event with a minimal response."""
-    minimal_response = OpenAIResponse(
-        id=response_id,
-        created_at=time.time(),
-        model=model,
-        object="response",
-        output=[],
-        parallel_tool_calls=body.parallel_tool_calls,
-        tool_choice=body.tool_choice,
-        tools=[],
-    )
-    return ResponseCompletedEvent(
-        type="response.completed",
-        response=minimal_response,
-        sequence_number=seq,
-    )
+async def _emit_content_events(
+    stream: AsyncStream[ChatCompletionChunk],
+    item_id: str,
+    usage_out: list[dict[str, object] | None],
+) -> AsyncIterator[str]:
+    """Emit item/delta/done SSE events from upstream chunks."""
+    final_text = ""
+    item_started = False
+
+    async for chunk in stream:  # type: ignore[type-var]
+        if chunk.usage:
+            usage_out[0] = _usage_from_chunk(chunk)
+
+        if not chunk.choices:
+            continue
+        choice = chunk.choices[0]
+        content = choice.delta.content
+        if content:
+            if not item_started:
+                item_started = True
+                yield _format_sse(
+                    "response.output_item.added",
+                    {
+                        "type": "response.output_item.added",
+                        "item": {
+                            "id": item_id,
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [],
+                        },
+                    },
+                )
+            final_text += content
+            yield _format_sse(
+                "response.output_text.delta",
+                {"type": "response.output_text.delta", "delta": content},
+            )
+        elif choice.finish_reason:
+            if not item_started:
+                item_started = True
+                yield _format_sse(
+                    "response.output_item.added",
+                    {
+                        "type": "response.output_item.added",
+                        "item": {
+                            "id": item_id,
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [],
+                        },
+                    },
+                )
+            yield _format_sse(
+                "response.output_text.done",
+                {"type": "response.output_text.done", "text": final_text},
+            )
+            yield _format_sse(
+                "response.output_item.done",
+                {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "id": item_id,
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": final_text}],
+                    },
+                },
+            )
+
+    # Stream ended without any content chunks.
+    # Emit empty item events so codex can produce item.completed even when
+    # the upstream returned no content (e.g. oversized instructions/tools).
+    if not item_started:
+        yield _format_sse(
+            "response.output_item.added",
+            {
+                "type": "response.output_item.added",
+                "item": {
+                    "id": item_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [],
+                },
+            },
+        )
+        yield _format_sse(
+            "response.output_text.done",
+            {"type": "response.output_text.done", "text": ""},
+        )
+        yield _format_sse(
+            "response.output_item.done",
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "id": item_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": ""}],
+                },
+            },
+        )
 
 
 async def _relay_stream(
@@ -337,66 +430,49 @@ async def _relay_stream(
 ) -> AsyncIterator[str]:
     """Forward the mapped Chat Completions request using the OpenAI SDK."""
     upstream_body = responses_to_chat_completions(body)
-    seq = 0
     item_id = f"msg_{_random_hex(25)}"
-    final_text: str | None = None
+
+    yield _format_sse(
+        "response.created",
+        {"type": "response.created", "response": {"id": response_id}},
+    )
 
     async with AsyncOpenAI(api_key=api_key, base_url=base_url) as client:
-        extra_kwargs: dict[str, Any] = {}
-        for key in (
-            "tools",
-            "tool_choice",
-            "parallel_tool_calls",
-            "reasoning_effort",
-            "service_tier",
-            "prompt_cache_key",
-            "verbosity",
-            "response_format",
-        ):
-            if key in upstream_body:
-                extra_kwargs[key] = upstream_body[key]
+        extra_kwargs = _stream_extra_kwargs(upstream_body)
         try:
             stream = await client.chat.completions.create(
                 model=upstream_body["model"],
                 messages=upstream_body["messages"],
                 stream=True,
+                stream_options={"include_usage": True},
                 **extra_kwargs,
             )
         except openai.APIError as e:
-            error_event = ResponseErrorEvent(
-                type="error",
-                message=f"Upstream connection failed: {e}",
-                sequence_number=seq,
+            yield _format_sse(
+                "response.failed",
+                {
+                    "type": "response.failed",
+                    "response": {
+                        "id": response_id,
+                        "status": "failed",
+                        "error": {"code": "upstream_error", "message": str(e)},
+                    },
+                },
             )
-            yield _format_sse("error", error_event.model_dump(mode="json"))
             return
 
+        usage_out: list[dict[str, object] | None] = [None]
         # pyrefly cannot infer stream type through **extra_kwargs
-        async for chunk in stream:  # type: ignore[type-var]
-            seq += 1
-            if chunk.choices:
-                choice = chunk.choices[0]
-                content = choice.delta.content
-                if content:
-                    final_text = (final_text or "") + content
-                    delta_event = _build_text_delta_event(content, item_id, seq)
-                    yield _format_sse(
-                        "response.output_text.delta",
-                        delta_event.model_dump(mode="json"),
-                    )
-                elif choice.finish_reason:
-                    done_text = final_text or ""
-                    done_event = _build_text_done_event(done_text, item_id, seq)
-                    yield _format_sse(
-                        "response.output_text.done",
-                        done_event.model_dump(mode="json"),
-                    )
+        events = _emit_content_events(stream, item_id, usage_out)  # type: ignore[type-var]
+        async for event in events:  # type: ignore[type-var]
+            yield event
+        final_usage = usage_out[0]
 
-    seq += 1
-    completed_event = _build_completed_event(
-        body, upstream_body["model"], response_id, seq
-    )
+    # 6. response.completed
+    resp: dict[str, object] = {"id": response_id, "status": "completed"}
+    if final_usage:
+        resp["usage"] = final_usage
     yield _format_sse(
         "response.completed",
-        completed_event.model_dump(mode="json"),
+        {"type": "response.completed", "response": resp},
     )
