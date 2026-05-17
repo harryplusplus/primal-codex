@@ -53,10 +53,50 @@ from pydantic import BaseModel, ValidationError
 
 
 class ResponsesApiRequest(BaseModel):
-    """Pydantic model matching the Codex ``ResponsesApiRequest``.
+    """Wire-format mirror of the Codex client's ``ResponsesApiRequest``.
 
-    All ``Optional`` Rust fields (``Option<T>``) default to ``None``.
-    Required fields (``model``, ``input``) have no default.
+    This is **not** the standard OpenAI Responses API.
+
+    The Codex client
+    (``<repo_root>/external/codex/codex-rs/codex-api/src/common.rs``)
+    serializes its own ``ResponsesApiRequest`` struct as JSON and sends
+    it to the Primal Codex ``POST /responses`` endpoint.  This Pydantic
+    model deserializes that same JSON.
+
+    The OpenAI SDK's ``ResponseCreateParamsBase``
+    (``<repo_root>/.venv/lib/python3.11/site-packages/openai/types/
+    responses/response_create_params.py``) is the *spec* for OpenAI's
+    standard Responses API, but the Codex client does **not** send that
+    wire format.  Instead it sends a subset of those fields (12 of 28)
+    plus two Codex-specific ones:
+
+    * ``client_metadata`` — traceparent/tracestate for W3C distributed
+      tracing; not part of the OpenAI spec.
+    * ``stream`` — a plain ``bool``, whereas OpenAI splits this into
+      two type-level variants (``ResponseCreateParamsNonStreaming`` vs
+      ``ResponseCreateParamsStreaming``).
+
+    The following OpenAI-standard fields are **omitted** because the
+    Codex client handles them differently or doesn't need them:
+    ``temperature``, ``top_p``, ``top_logprobs``, ``max_output_tokens``,
+    ``max_tool_calls``, ``previous_response_id``, ``conversation``,
+    ``metadata``, ``user``, ``safety_identifier``, ``background``,
+    ``context_management``, ``truncation``, ``prompt``,
+    ``prompt_cache_retention``, ``stream_options``.
+
+    Every remaining field matches the Rust struct one-to-one:
+
+    * ``Option<T>`` → ``type | None``, defaults to ``None``.
+    * ``T`` (non-optional) → ``T``, with the same default as the
+      Rust side (``""`` for ``String``, ``[]`` for ``Vec``, ``false``
+      for ``bool``, etc.).  Note that ``skip_serializing_if`` on the
+      Rust side is a serialization-only optimisation — it does not
+      make the field optional at the wire level.
+
+    **Internal types are reused from the OpenAI SDK** wherever the
+    wire format overlaps: ``EasyInputMessage``, ``ResponseInputContent``,
+    ``ResponseTextConfig``, and ``Reasoning`` all come from
+    ``openai.types.responses.*``.
     """
 
     model: str
