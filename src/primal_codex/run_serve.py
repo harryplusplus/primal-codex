@@ -72,20 +72,6 @@ async def healthz() -> JSONResponse:
     """Health check endpoint."""
     return JSONResponse({"status": "ok"})
 
-
-# Fields with ``skip_serializing_if = "Option::is_none"`` in upstream Rust.
-# Safe to omit from JSON when ``None`` — Codex client uses its own default.
-_SKIPPABLE_NONE_FIELDS = frozenset(
-    {
-        "default_reasoning_level",
-        "model_messages",
-        "context_window",
-        "max_context_window",
-        "auto_compact_token_limit",
-    }
-)
-
-
 @app.get(
     "/models",
     summary="List Models",
@@ -95,14 +81,12 @@ _SKIPPABLE_NONE_FIELDS = frozenset(
     tags=["models"],
 )
 def models(request: Request) -> JSONResponse:
-    """List all models — reads from cached config, omits skippable null fields."""
-    model_infos: list[ModelInfo] = request.app.state.model_infos
-    dumped = ModelsResponse(models=model_infos).model_dump()
-    for m in dumped["models"]:
-        for field in _SKIPPABLE_NONE_FIELDS & m.keys():
-            if m[field] is None:
-                del m[field]
-    return JSONResponse(dumped)
+    """List all models — reads from pre-computed model info."""
+    return JSONResponse(
+        ModelsResponse(models=request.app.state.model_infos).model_dump(
+            mode="json"
+        )
+    )
 
 
 @app.post("/responses", response_model=None)
