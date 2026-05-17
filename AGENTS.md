@@ -36,5 +36,5 @@
 
 ### 통합 테스트
 
-`tests/test_integration.py` — `CROF_API_KEY` 없으면 `pytest.fail()`로 실패.
+`tests/test_integration.py` — `CROF_API_KEY` 없으면 `pytest.fail()`로 실패합니다.
 텍스트, 이미지, 도구 호출, 멀티턴 등 기능이 추가될 때마다 시나리오 클래스를 추가하세요.
