@@ -15,39 +15,20 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     import httpx
 
 import pytest
 from fastapi.testclient import TestClient
 
-from primal_codex.config import PrimalCodexConfig, ProviderConfig, compute_model_map
+from primal_codex.config import PrimalCodexConfig, ProviderConfig
 from primal_codex.models import ModelConfig
-from primal_codex.run_serve import AppContext, app
-
-
-def _setup_app_ctx(config: PrimalCodexConfig) -> None:
-    """Set the module-level app context for testing."""
-    app.state.ctx = AppContext(
-        primal_config=config,
-        model_map=compute_model_map(config),
-    )
-
-
-@pytest.fixture(autouse=True)
-def _auto_cleanup_ctx() -> Generator[None, None, None]:
-    """Clean up module-level app state after each test."""
-    _setup_app_ctx(PrimalCodexConfig())
-    yield
-    if hasattr(app.state, "ctx"):
-        del app.state.ctx
+from primal_codex.run_serve import create_app
 
 
 @pytest.fixture
 def client() -> TestClient:
-    """Return a TestClient for the Primal Codex app."""
-    return TestClient(app)
+    """Return a TestClient for a Primal Codex app with an empty config."""
+    return TestClient(create_app(PrimalCodexConfig()))
 
 
 class TestModelsEndpoint:
@@ -82,7 +63,7 @@ class TestModelsEndpoint:
         response = self._get(client)
         assert response.json()["models"] == []
 
-    def test_single_model(self, client: TestClient) -> None:
+    def test_single_model(self) -> None:
         """Include one model entry for a single provider with one model."""
         config = PrimalCodexConfig(
             providers={
@@ -93,15 +74,14 @@ class TestModelsEndpoint:
                 ),
             }
         )
-        _setup_app_ctx(config)
-
+        client = TestClient(create_app(config))
         response = self._get(client)
         data = response.json()
         assert len(data["models"]) == 1
         assert data["models"][0]["slug"] == "crof/glm-5"
         assert data["models"][0]["display_name"] == "GLM-5"
 
-    def test_multiple_providers(self, client: TestClient) -> None:
+    def test_multiple_providers(self) -> None:
         """Merge models from all configured providers."""
         config = PrimalCodexConfig(
             providers={
@@ -109,13 +89,12 @@ class TestModelsEndpoint:
                 "b": ProviderConfig(models={"m3": ModelConfig()}),
             }
         )
-        _setup_app_ctx(config)
-
+        client = TestClient(create_app(config))
         response = self._get(client)
         slugs = {m["slug"] for m in response.json()["models"]}
         assert slugs == {"a/m1", "a/m2", "b/m3"}
 
-    def test_sorted_by_priority(self, client: TestClient) -> None:
+    def test_sorted_by_priority(self) -> None:
         """Sort models by priority in ascending order."""
         config = PrimalCodexConfig(
             providers={
@@ -128,8 +107,7 @@ class TestModelsEndpoint:
                 ),
             }
         )
-        _setup_app_ctx(config)
-
+        client = TestClient(create_app(config))
         response = self._get(client)
         priorities = [m["priority"] for m in response.json()["models"]]
         assert priorities == sorted(priorities)

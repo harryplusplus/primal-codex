@@ -2,71 +2,32 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from importlib.metadata import version
 
 import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI
 
+from primal_codex.app_context import AppContext
 from primal_codex.config import PrimalCodexConfig, compute_model_map, load_config
-from primal_codex.models import ModelInfo, ModelsResponse
-from primal_codex.responses import handle_responses
+from primal_codex.routes_healthz import router as healthz_router
+from primal_codex.routes_models import router as models_router
+from primal_codex.routes_responses import router as responses_router
 
 
-@dataclass
-class AppContext:
-    """Type-safe holder for application-wide state."""
+def create_app(primal_config: PrimalCodexConfig) -> FastAPI:
+    """Build and return a configured FastAPI application.
 
-    primal_config: PrimalCodexConfig
-    model_map: dict[str, ModelInfo]
+    This is a pure factory — it does not load any configuration on its own.
+    Callers are responsible for providing a fully resolved
+    :class:`PrimalCodexConfig`.
 
+    Args:
+        primal_config: Fully resolved application configuration.
 
-def _register_routes(app: FastAPI) -> None:
-    """Register route handlers on the given FastAPI application."""
+    Returns:
+        A fully configured FastAPI application ready to serve.
 
-    @app.get(
-        "/healthz",
-        summary="Health Check",
-        description="Returns a simple status to confirm the server is running.",
-        tags=["system"],
-    )
-    async def healthz() -> JSONResponse:
-        """Health check endpoint."""
-        return JSONResponse({"status": "ok"})
-
-    @app.get(
-        "/models",
-        summary="List Models",
-        description=(
-            "Return metadata for all models discovered from configured providers."
-        ),
-        tags=["models"],
-        operation_id="list_models",
-    )
-    def models(request: Request) -> ModelsResponse:
-        """List all models — reads from pre-computed model info."""
-        return ModelsResponse(models=list(request.app.state.ctx.model_map.values()))
-
-    @app.post("/responses", response_model=None)
-    async def responses(
-        request: Request,
-    ) -> JSONResponse | StreamingResponse:
-        """Relay upstream responses as JSON or SSE.
-
-        Accepts an OpenAI Responses API request body and relays it to
-        the appropriate provider as a Chat Completions request.
-        """
-        return await handle_responses(request)
-
-
-def build_app(raw_config: dict[str, object] | None = None) -> FastAPI:
-    """Build and return a configured FastAPI application."""
-    if raw_config is not None:
-        primal_config = PrimalCodexConfig.model_validate(raw_config)
-    else:
-        primal_config = load_config()
-
+    """
     app = FastAPI(
         title="Primal Codex",
         summary="OpenAI Responses API to Chat Completions reverse proxy",
@@ -83,23 +44,20 @@ def build_app(raw_config: dict[str, object] | None = None) -> FastAPI:
         primal_config=primal_config,
         model_map=compute_model_map(primal_config),
     )
-    _register_routes(app)
+    app.include_router(healthz_router)
+    app.include_router(models_router)
+    app.include_router(responses_router)
     return app
-
-
-app = build_app()
 
 
 def run_serve() -> None:
     """Start the FastAPI server."""
-    app.state.ctx = AppContext(
-        primal_config=load_config(),
-        model_map=compute_model_map(load_config()),  # type: ignore[arg-type]
-    )
+    primal_config = load_config()
+    app = create_app(primal_config)
     uvicorn_config = uvicorn.Config(
         app,
-        host=app.state.ctx.primal_config.server.host,
-        port=app.state.ctx.primal_config.server.port,
+        host=primal_config.server.host,
+        port=primal_config.server.port,
     )
     server = uvicorn.Server(uvicorn_config)
     server.run()

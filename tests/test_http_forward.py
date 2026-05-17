@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import openai
@@ -10,7 +9,9 @@ import pytest
 from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 
-from primal_codex.run_serve import build_app
+from primal_codex.config import PrimalCodexConfig, ProviderConfig
+from primal_codex.models import ModelConfig
+from primal_codex.run_serve import create_app
 
 _VALID_BODY: dict[str, object] = {
     "model": "test-provider/test-model",
@@ -41,22 +42,22 @@ def _mock_chunk(content: str | None, finish: str | None = None) -> MagicMock:
     return chunk
 
 
-def _make_config() -> dict[str, Any]:
-    """Build a minimal config dict for testing."""
-    return {
-        "server": {"host": "127.0.0.1", "port": 8099},
-        "providers": {
-            "test-provider": {
-                "base_url": "https://upstream.test",
-                "env_key": "TEST_API_KEY",
-                "models": {
-                    "test-model": {
-                        "display_name": "Test Model",
-                    },
+def _make_config() -> PrimalCodexConfig:
+    """Build a minimal config for testing."""
+    return PrimalCodexConfig(
+        server={"host": "127.0.0.1", "port": 8099},
+        providers={
+            "test-provider": ProviderConfig(
+                base_url="https://upstream.test",
+                env_key="TEST_API_KEY",
+                models={
+                    "test-model": ModelConfig(
+                        display_name="Test Model",
+                    ),
                 },
-            },
+            ),
         },
-    }
+    )
 
 
 class _MockAsyncStream:
@@ -107,8 +108,8 @@ def _patch_async_openai(
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """FastAPI ``TestClient`` with mocked async client."""
-    raw_config = _make_config()
-    app = build_app(raw_config)
+    config = _make_config()
+    app = create_app(config)
     monkeypatch.setenv("TEST_API_KEY", "sk-test123")
 
     mock_client = _make_mock_async_openai()

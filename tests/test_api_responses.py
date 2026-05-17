@@ -14,16 +14,16 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, patch
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Generator
+    from collections.abc import AsyncIterator
 
 import pytest
 from fastapi.testclient import TestClient
 from openai.types.chat import ChatCompletionChunk
 
-from primal_codex.config import PrimalCodexConfig, ProviderConfig, compute_model_map
+from primal_codex.config import PrimalCodexConfig, ProviderConfig
 from primal_codex.models import ModelConfig
 from primal_codex.responses import ResponsesApiRequest
-from primal_codex.run_serve import AppContext, app
+from primal_codex.run_serve import create_app
 
 _VALID_MODEL = "crof/glm-5"
 
@@ -42,44 +42,27 @@ def _make_config() -> PrimalCodexConfig:
     )
 
 
-def _setup_app_ctx(config: PrimalCodexConfig) -> None:
-    """Set the module-level app context for testing."""
-    app.state.ctx = AppContext(
-        primal_config=config,
-        model_map=compute_model_map(config),
+def _empty_stream() -> AsyncIterator[object]:
+    """Yield a single [DONE]-like event then stop."""
+    yield ChatCompletionChunk(
+        id="x",
+        object="chat.completion.chunk",
+        created=1,
+        model="gpt-4",
+        choices=[{"delta": {"content": ""}, "index": 0, "finish_reason": "stop"}],
     )
 
 
-@pytest.fixture(autouse=True)
-def _auto_ctx() -> Generator[None, None, None]:
-    """Set a default app context with mocked upstream before each test."""
-    _setup_app_ctx(_make_config())
-
-    async def _empty_stream() -> AsyncIterator[object]:
-        """Yield a single [DONE]-like event then stop."""
-        yield ChatCompletionChunk(
-            id="x",
-            object="chat.completion.chunk",
-            created=1,
-            model="gpt-4",
-            choices=[{"delta": {"content": ""}, "index": 0, "finish_reason": "stop"}],
-        )
-
+@pytest.fixture
+def client() -> TestClient:
+    """Return a TestClient with a mocked upstream."""
     mock_client = AsyncMock()
     mock_client.chat.completions.create = AsyncMock(return_value=_empty_stream())
     with patch(
         "primal_codex.responses.AsyncOpenAI",
         return_value=mock_client,
     ):
-        yield
-    if hasattr(app.state, "ctx"):
-        del app.state.ctx
-
-
-@pytest.fixture
-def client() -> TestClient:
-    """Return a TestClient for the Primal Codex app."""
-    return TestClient(app)
+        yield TestClient(create_app(_make_config()))
 
 
 def _valid_body() -> dict[str, Any]:

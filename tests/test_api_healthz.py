@@ -14,13 +14,14 @@ from http import HTTPStatus
 import pytest
 from fastapi.testclient import TestClient
 
-from primal_codex.run_serve import app
+from primal_codex.config import PrimalCodexConfig
+from primal_codex.run_serve import create_app
 
 
 @pytest.fixture
 def client() -> TestClient:
-    """Return a TestClient for the Primal Codex app."""
-    return TestClient(app)
+    """Return a TestClient for a fresh Primal Codex app."""
+    return TestClient(create_app(PrimalCodexConfig()))
 
 
 class TestHealthz:
