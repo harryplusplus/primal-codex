@@ -39,6 +39,10 @@ ignore = [
 "tests/**/*.py" = [
     # See https://docs.astral.sh/ruff/rules/assert/
     "S101",
+    # Test assertions about config values, not actual bindings.
+    "S104",
+    # Port numbers, priority values, context limits — meaningful as-is.
+    "PLR2004",
 ]
 
 [tool.pyrefly]

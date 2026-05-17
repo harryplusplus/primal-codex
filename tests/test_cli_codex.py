@@ -1,9 +1,9 @@
 """Tests for the ``primal-codex codex`` CLI command.
 
 Behavior under test:
-1.  ``codex`` with no existing Codex config creates one with correct provider settings.
-2.  ``codex`` with already-correct config is a no-op.
-3.  ``codex`` with wrong provider value updates and backs up the config.
+1.  ``codex`` creates a Codex config with correct provider settings when none exists.
+2.  ``codex`` is a no-op when config is already correct.
+3.  ``codex`` fixes an incorrect ``model_provider`` and backs up the old config.
 4.  ``codex`` removes ``model_catalog_json`` if present.
 5.  ``codex`` respects custom ``server.host`` / ``server.port``.
 """
@@ -31,7 +31,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """``codex`` creates a Codex config when none exists."""
+        """Create a Codex config when none exists."""
         result = cli_runner.invoke(app, ["codex"], env=cli_env)
 
         assert result.exit_code == 0, f"CLI exited with error: {result.stdout}"
@@ -44,7 +44,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """The new Codex config contains the expected provider values."""
+        """Set the correct provider name and base URL."""
         cli_runner.invoke(app, ["codex"], env=cli_env)
         config_path = tmp_codex_home / "config.toml"
 
@@ -62,7 +62,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """``codex`` prints an update message with the config path."""
+        """Print an update message with the config path."""
         result = cli_runner.invoke(app, ["codex"], env=cli_env)
         config_path = tmp_codex_home / "config.toml"
         assert f"Updated Codex config at {config_path}" in result.stdout
@@ -72,7 +72,7 @@ class TestCodex:
         cli_runner: CliRunner,
         cli_env: dict[str, str],
     ) -> None:
-        """``codex`` prints each value that was set."""
+        """Print each value that was set."""
         result = cli_runner.invoke(app, ["codex"], env=cli_env)
 
         set_provider = f"Set model_provider = '{PRIMAL_CODEX_PROVIDER_ID}'"
@@ -94,7 +94,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """``codex`` is a no-op when config is already correct."""
+        """Skip changes when config is already correct."""
         cli_runner.invoke(app, ["codex"], env=cli_env)
         config_path = tmp_codex_home / "config.toml"
         contents_before = config_path.read_text(encoding="utf-8")
@@ -109,7 +109,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """No ``.bak`` file is created when config is already up to date."""
+        """Skip creating a ``.bak`` file when no changes are needed."""
         cli_runner.invoke(app, ["codex"], env=cli_env)
         cli_runner.invoke(app, ["codex"], env=cli_env)
         assert not (tmp_codex_home / "config.toml.bak").exists()
@@ -120,7 +120,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """``codex`` fixes an incorrect ``model_provider`` value."""
+        """Fix an incorrect ``model_provider`` value."""
         config_path = tmp_codex_home / "config.toml"
         config_path.write_text(
             "model_provider = 'some-other-provider'\n", encoding="utf-8"
@@ -137,7 +137,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """``codex`` fixes an incorrect ``base_url`` value."""
+        """Fix an incorrect ``base_url`` value."""
         config_path = tmp_codex_home / "config.toml"
         config_path.write_text(
             "[model_providers.primal-codex]\nname = 'primal-codex'\nbase_url = 'http://wrong:9999'\n",
@@ -158,7 +158,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """``codex`` removes ``model_catalog_json`` from the Codex config."""
+        """Remove ``model_catalog_json`` from the Codex config."""
         config_path = tmp_codex_home / "config.toml"
         config_path.write_text(
             'model_catalog_json = "/some/path"\nmodel_provider = "wrong"\n',
@@ -178,7 +178,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """A ``.bak`` file is created when changes are made."""
+        """Create a ``.bak`` file when changes are made."""
         config_path = tmp_codex_home / "config.toml"
         original = "model_provider = 'old-provider'\n"
         config_path.write_text(original, encoding="utf-8")
@@ -195,7 +195,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """``codex`` prints a backup message when backing up an existing config."""
+        """Print a backup message when backing up an existing config."""
         config_path = tmp_codex_home / "config.toml"
         config_path.write_text("model_provider = 'old'\n", encoding="utf-8")
 
@@ -209,7 +209,7 @@ class TestCodex:
         cli_env: dict[str, str],
         tmp_primal_home: Path,
     ) -> None:
-        """``codex`` uses custom ``server.host`` and ``server.port`` for base_url."""
+        """Use custom ``server.host`` and ``server.port`` for base_url."""
         config_path = tmp_primal_home / "config.toml"
         config_path.write_text(
             "[server]\nhost = '0.0.0.0'\nport = 9999\n", encoding="utf-8"

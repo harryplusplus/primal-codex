@@ -107,7 +107,7 @@ class TestInit:
         tmp_primal_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """``init`` prints an "already exists" message when config exists."""
+        """Print an "already exists" message for existing config."""
         config_path = tmp_primal_home / "config.toml"
         config_path.write_text("", encoding="utf-8")
 
