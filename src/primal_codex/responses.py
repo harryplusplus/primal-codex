@@ -72,7 +72,6 @@ from openai.types.chat.chat_completion_user_message_param import (
 )
 from openai.types.chat.completion_create_params import ResponseFormat
 from openai.types.responses.custom_tool import CustomTool
-from openai.types.responses.easy_input_message import EasyInputMessage
 from openai.types.responses.function_tool import FunctionTool
 from openai.types.responses.response_format_text_json_schema_config import (
     ResponseFormatTextJSONSchemaConfig,
@@ -981,14 +980,15 @@ class ResponsesApiRequest(BaseModel):
     """
 
     model: str
-    input: list[EasyInputMessage]
     instructions: str | None = None
-    tools: list[Any] = []
-    tool_choice: str
-    parallel_tool_calls: bool
+
+    # openai.types.responses.ResponseInputItem BaseModel
+    # openai.types.responses.ResponseInputItemParam TypedDict
+    input: list[Any]
+
+    tools: list[Any]
     reasoning: Reasoning | None
     stream: bool
-    include: list[str] = []
     text: ResponseTextConfig | None = None
 
 
