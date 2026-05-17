@@ -259,7 +259,7 @@ def enrich_model(
     model_id: str,
     provider_id: str,
     cfg: ModelConfig,
-    default_base_instructions: str = "",
+    default_base_instructions: str,
 ) -> ModelInfo:
     """Build a complete ``ModelInfo`` from a user-supplied ``ModelConfig``.
 
