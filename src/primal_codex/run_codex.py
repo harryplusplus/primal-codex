@@ -22,14 +22,27 @@ PRIMAL_CODEX_PROVIDER_ID = "primal-codex"
 
 
 class _DeleteMarker:
-    """Marker for a TOML key to be removed, optionally with a reason.
+    """Sentinel type for marking a TOML key to be removed."""
 
-    When a non-empty ``reason`` is provided it is included in the removal
-    message shown to the user.
+
+_DELETE = _DeleteMarker()
+
+# Desired value can be:
+#   * a plain value — set the key to that value (default message format)
+#   * a (value, message) tuple — set the key and use message instead of default
+#   * _DELETE — remove the key (default "Removed" message)
+#   * (_DELETE, message) — remove the key with a custom removal message
+
+
+def _unwrap(dv: object) -> tuple[object, str]:
+    """Normalise a desired value into ``(value, message)``.
+
+    A plain value gets an empty message (default format).  A ``(value,
+    message)`` tuple passes through.  ``_DELETE`` is kept as-is.
     """
-
-    def __init__(self, reason: str = "") -> None:
-        self.reason = reason
+    if isinstance(dv, tuple):
+        return dv[0], dv[1]
+    return dv, ""
 
 
 def _get_toml_value(doc: TOMLDocument, key: str) -> object:
@@ -78,9 +91,10 @@ def _delete_toml_key(doc: TOMLDocument, key: str) -> None:
 
 def _detect_changes(doc: TOMLDocument, desired: dict[str, object]) -> bool:
     """Return ``True`` when any desired value differs from the current document."""
-    for key, value in desired.items():
+    for key, dv in desired.items():
+        value, _msg = _unwrap(dv)
         current = _get_toml_value(doc, key)
-        if isinstance(value, _DeleteMarker):
+        if value is _DELETE:
             if current is not None:
                 return True
         elif current != value:
@@ -109,7 +123,10 @@ def run_codex() -> None:
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name": PRIMAL_CODEX_PROVIDER_ID,
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url": server_url,
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.supports_websockets": False,
-        "model_catalog_json": _DeleteMarker("Primal Codex manages models dynamically"),
+        "model_catalog_json": (
+            _DELETE,
+            "Primal Codex manages models dynamically",
+        ),
     }
 
     # 4. Detect whether any change is needed.
@@ -126,8 +143,9 @@ def run_codex() -> None:
 
     # 6. Apply all desired changes using tomlkit (preserves formatting of
     #    untouched sections).
-    for key, value in desired.items():
-        if isinstance(value, _DeleteMarker):
+    for key, dv in desired.items():
+        value, _msg = _unwrap(dv)
+        if value is _DELETE:
             _delete_toml_key(doc, key)
         else:
             _set_toml_value(doc, key, value)
@@ -137,11 +155,14 @@ def run_codex() -> None:
 
     # 7. Report results.
     typer.echo(f"Updated Codex config at {codex_path}")
-    for key, value in desired.items():
-        if isinstance(value, _DeleteMarker):
-            msg = f"  Removed {key}"
-            if value.reason:
-                msg += f" ({value.reason})"
-            typer.echo(msg)
+    for key, dv in desired.items():
+        value, msg = _unwrap(dv)
+        if value is _DELETE:
+            line = f"  Removed {key}"
+            if msg:
+                line += f" ({msg})"
+        elif msg:
+            line = f"  {msg}"
         else:
-            typer.echo(f"  Set {key} = {value!r}")
+            line = f"  Set {key} = {value!r}"
+        typer.echo(line)
