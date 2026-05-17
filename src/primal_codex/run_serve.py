@@ -140,11 +140,11 @@ async def responses(
 
 def run_serve() -> None:
     """Start the FastAPI server."""
-    primal = PrimalCodexConfig()
+    primal_config = PrimalCodexConfig()
     uvicorn_config = uvicorn.Config(
         app,
-        host=primal.server.host,
-        port=primal.server.port,
+        host=primal_config.server.host,
+        port=primal_config.server.port,
     )
     server = uvicorn.Server(uvicorn_config)
     server.run()
