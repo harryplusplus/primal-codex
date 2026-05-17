@@ -1,4 +1,4 @@
-"""Primal Codex config initialisation."""
+"""Primal Codex config initialization."""
 
 import typer
 
@@ -14,7 +14,6 @@ def run_init() -> None:
     An existing file is never overwritten.
     """
     path = resolve_primal_codex_config_path()
-
     if path.exists():
         typer.echo(f"Config already exists at {path}")
         return
