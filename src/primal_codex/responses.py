@@ -987,13 +987,9 @@ class ResponsesApiRequest(BaseModel):
     tool_choice: str
     parallel_tool_calls: bool
     reasoning: Reasoning | None
-    store: bool
     stream: bool
     include: list[str] = []
-    service_tier: Literal["flex", "priority"] | None = None
-    prompt_cache_key: str | None = None
     text: ResponseTextConfig | None = None
-    client_metadata: dict[str, str] | None = None
 
 
 def _map_content_part(
@@ -1412,15 +1408,9 @@ async def relay_stream(
                 stream=True,
                 stream_options={"include_usage": True},
                 reasoning_effort=body.reasoning.effort if body.reasoning else Omit(),
-                parallel_tool_calls=body.parallel_tool_calls,
-                service_tier=body.service_tier,
+                response_format=response_format,
                 messages=messages,
                 tools=tools,
-                verbosity=body.text.verbosity if body.text else Omit(),
-                response_format=response_format,
-                prompt_cache_key=body.prompt_cache_key
-                if body.prompt_cache_key is not None
-                else Omit(),
             )
         except openai.APIError as e:
             yield _format_sse(

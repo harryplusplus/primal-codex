@@ -175,8 +175,8 @@ class ModelInfo(BaseModel):
     visibility: ModelVisibility
     supported_in_api: bool
     priority: int
-    additional_speed_tiers: list[str] = Field(default_factory=list)
-    service_tiers: list[ModelServiceTier] = Field(default_factory=list)
+    additional_speed_tiers: list[str] = []
+    service_tiers: list[ModelServiceTier] = []
     availability_nux: ModelAvailabilityNux | None
     upgrade: ModelInfoUpgrade | None
     base_instructions: str
@@ -225,8 +225,8 @@ class ModelConfig(BaseModel):
     visibility: ModelVisibility = ModelVisibility.list
     supported_in_api: bool = True
     priority: int = 0
-    additional_speed_tiers: list[str] = Field(default_factory=list)
-    service_tiers: list[ModelServiceTier] = Field(default_factory=list)
+    additional_speed_tiers: list[str] = []
+    service_tiers: list[ModelServiceTier] = []
     availability_nux: ModelAvailabilityNux | None = None
     upgrade: ModelInfoUpgrade | None = None
     base_instructions: str | None = None
@@ -248,7 +248,7 @@ class ModelConfig(BaseModel):
     max_context_window: int | None = None
     auto_compact_token_limit: int | None = None
     effective_context_window_percent: int = 95
-    experimental_supported_tools: list[str] = Field(default_factory=list)
+    experimental_supported_tools: list[str] = []
     input_modalities: list[InputModality] = Field(
         default_factory=lambda: [InputModality.text, InputModality.image]
     )
