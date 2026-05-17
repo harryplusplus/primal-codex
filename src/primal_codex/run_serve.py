@@ -80,13 +80,9 @@ async def healthz() -> JSONResponse:
     ),
     tags=["models"],
 )
-def models(request: Request) -> JSONResponse:
+def models(request: Request) -> ModelsResponse:
     """List all models — reads from pre-computed model info."""
-    return JSONResponse(
-        ModelsResponse(models=request.app.state.model_infos).model_dump(
-            mode="json"
-        )
-    )
+    return ModelsResponse(models=request.app.state.model_infos)
 
 
 @app.post("/responses", response_model=None)
