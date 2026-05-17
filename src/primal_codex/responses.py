@@ -20,6 +20,12 @@ from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 
 import openai
 from openai import AsyncOpenAI, AsyncStream, Omit
+from openai.types import (
+    ReasoningEffort,
+    ResponseFormatJSONObject,
+    ResponseFormatText,
+    shared_params,
+)
 from openai.types.chat.chat_completion_assistant_message_param import (
     ChatCompletionAssistantMessageParam,
 )
@@ -68,6 +74,7 @@ from openai.types.chat.chat_completion_tool_union_param import (
 from openai.types.chat.chat_completion_user_message_param import (
     ChatCompletionUserMessageParam,
 )
+from openai.types.chat.completion_create_params import ResponseFormat
 from openai.types.responses.custom_tool import CustomTool
 from openai.types.responses.easy_input_message import EasyInputMessage
 from openai.types.responses.function_tool import FunctionTool
@@ -81,9 +88,6 @@ from openai.types.shared.custom_tool_input_format import (
     Text,
 )
 from openai.types.shared.reasoning import Reasoning
-from openai.types.shared_params.response_format_json_schema import (
-    ResponseFormatJSONSchema,
-)
 from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
@@ -984,13 +988,13 @@ class ResponsesApiRequest(BaseModel):
     input: list[EasyInputMessage]
     instructions: str = ""
     tools: list[Any] = []
-    tool_choice: Literal["auto", "none", "required"] = "auto"
-    parallel_tool_calls: bool = True
-    reasoning: Reasoning | None = None
-    store: bool = False
-    stream: bool = True
+    tool_choice: str
+    parallel_tool_calls: bool
+    reasoning: Reasoning | None
+    store: bool
+    stream: bool
     include: list[str] = []
-    service_tier: Literal["auto", "default", "flex", "scale", "priority"] | None = None
+    service_tier: Literal["flex", "priority"] | None = None
     prompt_cache_key: str | None = None
     text: ResponseTextConfig | None = None
     client_metadata: dict[str, str] | None = None
@@ -1373,30 +1377,44 @@ async def relay_stream(
     """Forward the mapped Chat Completions request using the OpenAI SDK."""
     response_id = _generate_response_id()
     item_id = _generate_message_item_id()
-    messages = _map_messages(body)
-    stream_options: ChatCompletionStreamOptionsParam = ChatCompletionStreamOptionsParam(
-        include_usage=True
-    )
-    reasoning_effort: (
-        Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None | Omit
-    ) = Omit()
+
+    stream_options: ChatCompletionStreamOptionsParam = {"include_usage": True}
+
+    reasoning_effort: ReasoningEffort | None | Omit = Omit()
     if body.reasoning:
         reasoning_effort = body.reasoning.effort
+
     verbosity: Literal["low", "medium", "high"] | None | Omit = Omit()
     if body.text:
         verbosity = body.text.verbosity
-    tools: list[ChatCompletionToolUnionParam] | Omit = _map_tools(body.tools) or Omit()
-    response_format: ResponseFormatJSONSchema | Omit = Omit()
-    if body.text and isinstance(body.text.format, ResponseFormatTextJSONSchemaConfig):
-        fmt = body.text.format
-        response_format = ResponseFormatJSONSchema(
-            type="json_schema",
-            json_schema={
+
+    response_format: ResponseFormat | Omit = Omit()
+    if body.text:
+        if isinstance(body.text.format, ResponseFormatText):
+            response_format = {"type": "text"}
+        elif isinstance(body.text.format, ResponseFormatJSONObject):
+            response_format = {"type": "json_object"}
+        elif isinstance(body.text.format, ResponseFormatTextJSONSchemaConfig):
+            fmt = body.text.format
+            json_schema: shared_params.response_format_json_schema.JSONSchema = {
                 "name": fmt.name,
                 "schema": fmt.schema_,
                 "strict": fmt.strict,
-            },
-        )
+            }
+            if fmt.description is not None:
+                json_schema["description"] = fmt.description
+            response_format = shared_params.ResponseFormatJSONSchema(
+                type="json_schema",
+                json_schema=json_schema,
+            )
+
+    prompt_cache_key: str | Omit = Omit()
+    if body.prompt_cache_key is not None:
+        prompt_cache_key = body.prompt_cache_key
+
+    messages = _map_messages(body)
+
+    tools: list[ChatCompletionToolUnionParam] | Omit = _map_tools(body.tools) or Omit()
 
     yield _format_sse(
         ResponseCreatedEvent(
@@ -1409,19 +1427,16 @@ async def relay_stream(
         try:
             stream = await client.chat.completions.create(
                 model=model_id,
-                messages=messages,
                 stream=True,
                 stream_options=stream_options,
-                tools=tools,
-                tool_choice=body.tool_choice,
-                parallel_tool_calls=body.parallel_tool_calls,
                 reasoning_effort=reasoning_effort,
+                parallel_tool_calls=body.parallel_tool_calls,
                 service_tier=body.service_tier,
+                messages=messages,
+                tools=tools,
                 verbosity=verbosity,
                 response_format=response_format,
-                prompt_cache_key=body.prompt_cache_key
-                if body.prompt_cache_key is not None
-                else Omit(),
+                prompt_cache_key=prompt_cache_key,
             )
         except openai.APIError as e:
             yield _format_sse(
