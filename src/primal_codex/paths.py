@@ -7,10 +7,10 @@ display strings) are defined here as a single source of truth.
 import os
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_PATH = _REPO_ROOT / "assets" / "prompt.md"
-DEFAULT_CONFIG_PATH = _REPO_ROOT / "assets" / "default-config.toml"
+PROMPT_PATH = REPO_ROOT / "assets" / "prompt.md"
+DEFAULT_CONFIG_PATH = REPO_ROOT / "assets" / "default-config.toml"
 
 CONFIG_FILENAME = "config.toml"
 

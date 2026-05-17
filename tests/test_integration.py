@@ -19,10 +19,10 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 
+from primal_codex.paths import REPO_ROOT
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +30,7 @@ def _require_api_key() -> None:
     """Fail immediately if the required API key is missing."""
     if "CROF_API_KEY" not in os.environ:
         pytest.fail("CROF_API_KEY environment variable is required")
+
 
 _UV_BIN = os.environ.get("UV", shutil.which("uv") or "uv")
 _CODEX_BIN = shutil.which("codex") or "codex"
@@ -166,7 +167,7 @@ def _run_codex(
         check=False,
         stdin=subprocess.DEVNULL,
         env=full_env,
-        cwd=str(PROJECT_ROOT),
+        cwd=str(REPO_ROOT),
     )
 
 
@@ -182,7 +183,7 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     proc = subprocess.Popen(  # noqa: S603
         [_UV_BIN, "run", "primal-codex", "serve"],
         env=env,
-        cwd=str(PROJECT_ROOT),
+        cwd=str(REPO_ROOT),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -274,7 +275,7 @@ class TestSessionResume:
             check=False,
             stdin=subprocess.DEVNULL,
             env=full_env,
-            cwd=str(PROJECT_ROOT),
+            cwd=str(REPO_ROOT),
         )
         response2 = _agent_response(_json_events(result2.stdout))
         assert response2, f"Turn 2 empty. stderr: {result2.stderr[:300]}"
@@ -312,7 +313,7 @@ class TestSessionResume:
             check=False,
             stdin=subprocess.DEVNULL,
             env=full_env,
-            cwd=str(PROJECT_ROOT),
+            cwd=str(REPO_ROOT),
         )
         response2 = _agent_response(_json_events(result2.stdout))
         assert response2, f"No response: {result2.stderr[:300]}"
