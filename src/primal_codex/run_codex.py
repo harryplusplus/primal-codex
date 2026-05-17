@@ -119,13 +119,27 @@ def run_codex() -> None:
 
     # 3. Define the desired state — the single source of truth for all changes.
     desired: dict[str, object] = {
-        "model_provider": PRIMAL_CODEX_PROVIDER_ID,
-        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name": PRIMAL_CODEX_PROVIDER_ID,
-        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url": server_url,
-        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.supports_websockets": False,
+        "model_provider": (
+            PRIMAL_CODEX_PROVIDER_ID,
+            f"Use {PRIMAL_CODEX_PROVIDER_ID!r} as the model provider",
+        ),
+        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name": (
+            PRIMAL_CODEX_PROVIDER_ID,
+            f"Register model provider {PRIMAL_CODEX_PROVIDER_ID!r}",
+        ),
+        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url": (
+            server_url,
+            f"Point {PRIMAL_CODEX_PROVIDER_ID!r} at {server_url}",
+        ),
+        f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.supports_websockets": (
+            False,
+            f"{PRIMAL_CODEX_PROVIDER_ID!r} uses HTTP SSE streaming, not WebSocket",
+        ),
+        # Primal Codex manages model discovery via its own /models endpoint;
+        # a static model_catalog_json would interfere.
         "model_catalog_json": (
             _DELETE,
-            "Primal Codex manages models dynamically",
+            "Primal Codex provides model discovery via /models",
         ),
     }
 

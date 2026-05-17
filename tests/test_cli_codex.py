@@ -67,31 +67,31 @@ class TestCodex:
         config_path = tmp_codex_home / "config.toml"
         assert f"Updated Codex config at {config_path}" in result.stdout
 
-    def test_codex_prints_set_lines(
+    def test_codex_prints_custom_messages(
         self,
         cli_runner: CliRunner,
         cli_env: dict[str, str],
     ) -> None:
-        """Print each value that was set."""
+        """Print custom messages for each desired value."""
         result = cli_runner.invoke(app, ["codex"], env=cli_env)
 
-        set_provider = f"Set model_provider = '{PRIMAL_CODEX_PROVIDER_ID}'"
-        set_name = (
-            f"Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name"
-            f" = '{PRIMAL_CODEX_PROVIDER_ID}'"
+        assert (
+            f"Use '{PRIMAL_CODEX_PROVIDER_ID}' as the model provider" in result.stdout
         )
-        set_url = (
-            f"Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url"
-            " = 'http://127.0.0.1:8010'"
+        assert f"Register model provider '{PRIMAL_CODEX_PROVIDER_ID}'" in result.stdout
+        assert (
+            f"Point '{PRIMAL_CODEX_PROVIDER_ID}' at http://127.0.0.1:8010"
+            in result.stdout
         )
-        set_ws = (
-            f"Set model_providers.{PRIMAL_CODEX_PROVIDER_ID}.supports_websockets"
-            " = False"
+        assert (
+            f"'{PRIMAL_CODEX_PROVIDER_ID}' uses HTTP SSE streaming, not WebSocket"
+            in result.stdout
         )
-        assert set_provider in result.stdout
-        assert set_name in result.stdout
-        assert set_url in result.stdout
-        assert set_ws in result.stdout
+        removed_msg = (
+            "Removed model_catalog_json"
+            " (Primal Codex provides model discovery via /models)"
+        )
+        assert removed_msg in result.stdout
 
     def test_codex_already_up_to_date(
         self,
@@ -163,7 +163,7 @@ class TestCodex:
         tmp_codex_home: Path,
         cli_env: dict[str, str],
     ) -> None:
-        """Remove ``model_catalog_json`` from the Codex config."""
+        """Remove ``model_catalog_json`` and report the removal reason."""
         config_path = tmp_codex_home / "config.toml"
         config_path.write_text(
             'model_catalog_json = "/some/path"\nmodel_provider = "wrong"\n',
@@ -171,7 +171,11 @@ class TestCodex:
         )
 
         result = cli_runner.invoke(app, ["codex"], env=cli_env)
-        assert "Removed model_catalog_json" in result.stdout
+        removed_msg = (
+            "Removed model_catalog_json"
+            " (Primal Codex provides model discovery via /models)"
+        )
+        assert removed_msg in result.stdout
 
         with config_path.open("rb") as f:
             cfg = toml_load(f)
@@ -206,6 +210,38 @@ class TestCodex:
 
         result = cli_runner.invoke(app, ["codex"], env=cli_env)
         assert f"Backed up existing config to {config_path}.bak" in result.stdout
+
+    def test_codex_handles_multiple_issues(
+        self,
+        cli_runner: CliRunner,
+        tmp_codex_home: Path,
+        cli_env: dict[str, str],
+    ) -> None:
+        """Fix wrong provider AND remove model_catalog_json in one run."""
+        config_path = tmp_codex_home / "config.toml"
+        config_path.write_text(
+            'model_catalog_json = "/some/path"\n'
+            'model_provider = "some-other-provider"\n',
+            encoding="utf-8",
+        )
+
+        result = cli_runner.invoke(app, ["codex"], env=cli_env)
+
+        # Both changes reported with their custom messages.
+        removed_msg = (
+            "Removed model_catalog_json"
+            " (Primal Codex provides model discovery via /models)"
+        )
+        assert removed_msg in result.stdout
+        assert (
+            f"Use '{PRIMAL_CODEX_PROVIDER_ID}' as the model provider" in result.stdout
+        )
+
+        # Both applied to the file.
+        with config_path.open("rb") as f:
+            cfg = toml_load(f)
+        assert "model_catalog_json" not in cfg
+        assert cfg["model_provider"] == PRIMAL_CODEX_PROVIDER_ID
 
     def test_codex_uses_custom_host_port(
         self,
