@@ -55,14 +55,6 @@ class ActiveRelays:
             pass
 
 
-def _lookup_model(infos: list[ModelInfo], slug: str) -> ModelInfo | None:
-    """Look up a model by its qualified slug from a model list."""
-    for mi in infos:
-        if mi.slug == slug:
-            return mi
-    return None
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
     """Load config once on startup; drain relays on shutdown."""
