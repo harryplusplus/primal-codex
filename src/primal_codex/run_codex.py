@@ -135,8 +135,6 @@ def run_codex() -> None:
             False,
             f"{PRIMAL_CODEX_PROVIDER_ID!r} uses HTTP SSE streaming, not WebSocket",
         ),
-        # Primal Codex manages model discovery via its own /models endpoint;
-        # a static model_catalog_json would interfere.
         "model_catalog_json": (
             _DELETE,
             "Primal Codex provides model discovery via /models",
