@@ -54,14 +54,14 @@ def _lookup_model(infos: list[ModelInfo], slug: str) -> ModelInfo | None:
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator:
     """Load config once on startup; drain relays on shutdown."""
     primal_config = load_config()
-    _app.state.primal_config = primal_config
-    _app.state.model_infos = compute_model_infos(primal_config)
-    _app.state.relays = ActiveRelays()
+    app.state.primal_config = primal_config
+    app.state.model_infos = compute_model_infos(primal_config)
+    app.state.relays = ActiveRelays()
     yield
-    await _app.state.relays.wait_all()
+    await app.state.relays.wait_all()
 
 
 app = FastAPI(lifespan=lifespan)
