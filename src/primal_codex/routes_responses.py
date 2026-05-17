@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
 from primal_codex.responses import (
     ResponsesApiRequest,
-    generate_response_id,
     relay_stream,
 )
 
@@ -90,10 +89,9 @@ async def responses(
         )
 
     api_key = provider.resolve_api_key()
-    response_id = generate_response_id()
 
     return StreamingResponse(
-        relay_stream(body, model_id, provider.base_url, api_key, response_id),
+        relay_stream(body, model_id, provider.base_url, api_key),
         media_type="text/event-stream",
         headers={
             "cache-control": "no-cache",

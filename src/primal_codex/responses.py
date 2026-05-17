@@ -246,7 +246,7 @@ def responses_to_chat_completions(
     return result
 
 
-def generate_response_id() -> str:
+def _generate_response_id() -> str:
     """Generate a unique response ID.
 
     Sample: resp_0309c0d6cb4ff519016a032143c2288191b3759a2e031f11b2
@@ -450,9 +450,9 @@ async def relay_stream(
     model_id: str,
     base_url: str,
     api_key: str | None,
-    response_id: str,
 ) -> AsyncIterator[str]:
     """Forward the mapped Chat Completions request using the OpenAI SDK."""
+    response_id = _generate_response_id()
     upstream_body = responses_to_chat_completions(body, model_id)
     item_id = _generate_message_item_id()
 
