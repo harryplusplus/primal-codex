@@ -1129,33 +1129,78 @@ def _generate_call_id() -> str:
     return f"call_{''.join(result)}"
 
 
-def _format_sse(event_name: str, data: dict[str, Any]) -> str:
-    """Format a dict as an SSE ``event:`` / ``data:`` pair."""
+def _format_sse(data: ResponseStreamEvent) -> str:
+    """Format a TypedDict as an SSE ``event:`` / ``data:`` pair.
+
+    The event name is read from the ``type`` field of the TypedDict,
+    and the entire dict is serialised as the ``data`` line.
+    """
     encoded = json.dumps(data, separators=(",", ":"))
-    return f"event: {event_name}\ndata: {encoded}\n\n"
+    return f"event: {data['type']}\ndata: {encoded}\n\n"
 
 
 def _usage_from_chunk(
     chunk: ChatCompletionChunk,
-) -> dict[str, object] | None:
-    """Extract usage info from a chunk if present."""
+) -> ResponseUsage | None:
+    """Extract usage info from a chunk if present.
+
+    Maps the Chat Completions usage fields to the Responses API format
+    that the Codex Rust client expects (
+    ``external/codex/codex-rs/codex-api/src/sse/responses.rs``,
+    ``ResponseCompletedUsage``).
+
+    Nested details:
+    * ``prompt_tokens_details.cached_tokens`` →
+      ``input_tokens_details.cached_tokens``
+    * ``completion_tokens_details.reasoning_tokens`` →
+      ``output_tokens_details.reasoning_tokens``
+    """
     if not chunk.usage:
         return None
     u = chunk.usage
-    usage: dict[str, object] = {
+    usage: ResponseUsage = {
         "input_tokens": u.prompt_tokens,
         "output_tokens": u.completion_tokens,
         "total_tokens": u.total_tokens,
     }
+    if u.prompt_tokens_details and u.prompt_tokens_details.cached_tokens:
+        usage["input_tokens_details"] = ResponseUsageInputTokensDetails(
+            cached_tokens=u.prompt_tokens_details.cached_tokens
+        )
     if u.completion_tokens_details and u.completion_tokens_details.reasoning_tokens:
-        usage["reasoning_output_tokens"] = u.completion_tokens_details.reasoning_tokens
+        usage["output_tokens_details"] = ResponseUsageOutputTokensDetails(
+            reasoning_tokens=u.completion_tokens_details.reasoning_tokens
+        )
     return usage
+
+
+def _build_output_message(
+    item_id: str,
+    text: str,
+) -> ResponseOutputMessage:
+    """Build a ``ResponseOutputMessage`` with a single text content part."""
+    return ResponseOutputMessage(
+        id=item_id,
+        type="message",
+        role="assistant",
+        content=[ResponseOutputText(type="output_text", text=text)],
+    )
+
+
+def _build_empty_output_message(item_id: str) -> ResponseOutputMessage:
+    """Build a ``ResponseOutputMessage`` with an empty content list."""
+    return ResponseOutputMessage(
+        id=item_id,
+        type="message",
+        role="assistant",
+        content=[],
+    )
 
 
 async def _emit_content_events(
     stream: AsyncStream[ChatCompletionChunk],
     item_id: str,
-    usage_out: list[dict[str, object] | None],
+    usage_out: list[ResponseUsage | None],
 ) -> AsyncIterator[str]:
     """Emit item/delta/done SSE events from upstream chunks."""
     final_text = ""
@@ -1173,52 +1218,38 @@ async def _emit_content_events(
             if not item_started:
                 item_started = True
                 yield _format_sse(
-                    "response.output_item.added",
-                    {
-                        "type": "response.output_item.added",
-                        "item": {
-                            "id": item_id,
-                            "type": "message",
-                            "role": "assistant",
-                            "content": [],
-                        },
-                    },
+                    ResponseOutputItemAddedEvent(
+                        type="response.output_item.added",
+                        item=_build_empty_output_message(item_id),
+                    )
                 )
             final_text += content
             yield _format_sse(
-                "response.output_text.delta",
-                {"type": "response.output_text.delta", "delta": content},
+                ResponseTextDeltaEvent(
+                    type="response.output_text.delta",
+                    delta=content,
+                )
             )
         elif choice.finish_reason:
             if not item_started:
                 item_started = True
                 yield _format_sse(
-                    "response.output_item.added",
-                    {
-                        "type": "response.output_item.added",
-                        "item": {
-                            "id": item_id,
-                            "type": "message",
-                            "role": "assistant",
-                            "content": [],
-                        },
-                    },
+                    ResponseOutputItemAddedEvent(
+                        type="response.output_item.added",
+                        item=_build_empty_output_message(item_id),
+                    )
                 )
             yield _format_sse(
-                "response.output_text.done",
-                {"type": "response.output_text.done", "text": final_text},
+                ResponseTextDoneEvent(
+                    type="response.output_text.done",
+                    text=final_text,
+                )
             )
             yield _format_sse(
-                "response.output_item.done",
-                {
-                    "type": "response.output_item.done",
-                    "item": {
-                        "id": item_id,
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [{"type": "output_text", "text": final_text}],
-                    },
-                },
+                ResponseOutputItemDoneEvent(
+                    type="response.output_item.done",
+                    item=_build_output_message(item_id, final_text),
+                )
             )
 
     # Stream ended without any content chunks.
@@ -1226,32 +1257,22 @@ async def _emit_content_events(
     # the upstream returned no content (e.g. oversized instructions/tools).
     if not item_started:
         yield _format_sse(
-            "response.output_item.added",
-            {
-                "type": "response.output_item.added",
-                "item": {
-                    "id": item_id,
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [],
-                },
-            },
+            ResponseOutputItemAddedEvent(
+                type="response.output_item.added",
+                item=_build_empty_output_message(item_id),
+            )
         )
         yield _format_sse(
-            "response.output_text.done",
-            {"type": "response.output_text.done", "text": ""},
+            ResponseTextDoneEvent(
+                type="response.output_text.done",
+                text="",
+            )
         )
         yield _format_sse(
-            "response.output_item.done",
-            {
-                "type": "response.output_item.done",
-                "item": {
-                    "id": item_id,
-                    "type": "message",
-                    "role": "assistant",
-                    "content": [{"type": "output_text", "text": ""}],
-                },
-            },
+            ResponseOutputItemDoneEvent(
+                type="response.output_item.done",
+                item=_build_output_message(item_id, ""),
+            )
         )
 
 
@@ -1268,8 +1289,10 @@ async def relay_stream(
     extra_kwargs = _map_tools(body)
 
     yield _format_sse(
-        "response.created",
-        {"type": "response.created", "response": {"id": response_id}},
+        ResponseCreatedEvent(
+            type="response.created",
+            response=Response(id=response_id),
+        )
     )
 
     async with AsyncOpenAI(api_key=api_key, base_url=base_url) as client:
@@ -1283,30 +1306,30 @@ async def relay_stream(
             )
         except openai.APIError as e:
             yield _format_sse(
-                "response.failed",
-                {
-                    "type": "response.failed",
-                    "response": {
-                        "id": response_id,
-                        "status": "failed",
-                        "error": {"code": "upstream_error", "message": str(e)},
-                    },
-                },
+                ResponseFailedEvent(
+                    type="response.failed",
+                    response=Response(
+                        id=response_id,
+                        status="failed",
+                        error=ResponseError(code="upstream_error", message=str(e)),
+                    ),
+                )
             )
             return
 
-        usage_out: list[dict[str, object] | None] = [None]
+        usage_out: list[ResponseUsage | None] = [None]
         # pyrefly cannot infer stream type through **extra_kwargs
         events = _emit_content_events(stream, item_id, usage_out)  # type: ignore[type-var]
         async for event in events:  # type: ignore[type-var]
             yield event
         final_usage = usage_out[0]
 
-    # 6. response.completed
-    resp: dict[str, object] = {"id": response_id, "status": "completed"}
+    response: Response = Response(id=response_id, status="completed")
     if final_usage:
-        resp["usage"] = final_usage
+        response["usage"] = final_usage
     yield _format_sse(
-        "response.completed",
-        {"type": "response.completed", "response": resp},
+        ResponseCompletedEvent(
+            type="response.completed",
+            response=response,
+        )
     )

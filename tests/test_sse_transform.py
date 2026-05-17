@@ -25,9 +25,20 @@ def _make_chunk(
         usage_mock.prompt_tokens = usage.get("prompt_tokens", 0)
         usage_mock.completion_tokens = usage.get("completion_tokens", 0)
         usage_mock.total_tokens = usage.get("total_tokens", 0)
-        completion_details = MagicMock()
-        completion_details.reasoning_tokens = usage.get("completion_reasoning_tokens")
-        usage_mock.completion_tokens_details = completion_details
+        prompt_cached = usage.get("prompt_cached_tokens")
+        if prompt_cached is not None:
+            prompt_details = MagicMock()
+            prompt_details.cached_tokens = prompt_cached
+            usage_mock.prompt_tokens_details = prompt_details
+        else:
+            usage_mock.prompt_tokens_details = None
+        completion_reasoning = usage.get("completion_reasoning_tokens")
+        if completion_reasoning is not None:
+            completion_details = MagicMock()
+            completion_details.reasoning_tokens = completion_reasoning
+            usage_mock.completion_tokens_details = completion_details
+        else:
+            usage_mock.completion_tokens_details = None
         usage_obj = usage_mock
     return MagicMock(
         id="chunk_abc",
@@ -77,5 +88,5 @@ class TestUsageFromChunk:
             "input_tokens": 10,
             "output_tokens": 20,
             "total_tokens": 30,
-            "reasoning_output_tokens": 5,
+            "output_tokens_details": {"reasoning_tokens": 5},
         }
