@@ -1031,14 +1031,18 @@ def _map_item_content(
     ]
 
 
-def _map_messages(instructions: str | None, input) -> list[ChatCompletionMessageParam]:
+def _map_messages(
+    instructions: str | None, input_: list[Any]
+) -> list[ChatCompletionMessageParam]:
     """Map input items to Chat Completions messages."""
     messages: list[ChatCompletionMessageParam] = []
-    if instructions:
+
+    if instructions is not None:
         messages.append(
             ChatCompletionSystemMessageParam(role="system", content=instructions)
         )
-    for item in input:
+
+    for item in input_:
         mapped = _map_item_content(item.content)
         if not mapped:
             continue
