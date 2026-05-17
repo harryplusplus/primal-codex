@@ -13,12 +13,13 @@ SSE event payload types
 """
 
 import json
+import logging
 import os
 from collections.abc import AsyncIterator
 from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 
 import openai
-from openai import AsyncOpenAI, AsyncStream
+from openai import AsyncOpenAI, AsyncStream, Omit
 from openai.types.chat.chat_completion_assistant_message_param import (
     ChatCompletionAssistantMessageParam,
 )
@@ -39,26 +40,53 @@ from openai.types.chat.chat_completion_content_part_param import (
 from openai.types.chat.chat_completion_content_part_text_param import (
     ChatCompletionContentPartTextParam,
 )
+from openai.types.chat.chat_completion_custom_tool_param import (
+    ChatCompletionCustomToolParam,
+    Custom,
+    CustomFormatGrammar,
+    CustomFormatText,
+)
 from openai.types.chat.chat_completion_developer_message_param import (
     ChatCompletionDeveloperMessageParam,
+)
+from openai.types.chat.chat_completion_function_tool_param import (
+    ChatCompletionFunctionToolParam,
+    FunctionDefinition,
 )
 from openai.types.chat.chat_completion_message_param import (
     ChatCompletionMessageParam,
 )
+from openai.types.chat.chat_completion_stream_options_param import (
+    ChatCompletionStreamOptionsParam,
+)
 from openai.types.chat.chat_completion_system_message_param import (
     ChatCompletionSystemMessageParam,
+)
+from openai.types.chat.chat_completion_tool_union_param import (
+    ChatCompletionToolUnionParam,
 )
 from openai.types.chat.chat_completion_user_message_param import (
     ChatCompletionUserMessageParam,
 )
+from openai.types.responses.custom_tool import CustomTool
 from openai.types.responses.easy_input_message import EasyInputMessage
+from openai.types.responses.function_tool import FunctionTool
 from openai.types.responses.response_format_text_json_schema_config import (
     ResponseFormatTextJSONSchemaConfig,
 )
 from openai.types.responses.response_input_content import ResponseInputContent
 from openai.types.responses.response_text_config import ResponseTextConfig
+from openai.types.shared.custom_tool_input_format import (
+    Grammar,
+    Text,
+)
 from openai.types.shared.reasoning import Reasoning
-from pydantic import BaseModel
+from openai.types.shared_params.response_format_json_schema import (
+    ResponseFormatJSONSchema,
+)
+from pydantic import BaseModel, ValidationError
+
+logger = logging.getLogger(__name__)
 
 
 class ResponseError(TypedDict):
@@ -956,13 +984,13 @@ class ResponsesApiRequest(BaseModel):
     input: list[EasyInputMessage]
     instructions: str = ""
     tools: list[Any] = []
-    tool_choice: str = "auto"
+    tool_choice: Literal["auto", "none", "required"] = "auto"
     parallel_tool_calls: bool = True
     reasoning: Reasoning | None = None
     store: bool = False
     stream: bool = True
     include: list[str] = []
-    service_tier: str | None = None
+    service_tier: Literal["auto", "default", "flex", "scale", "priority"] | None = None
     prompt_cache_key: str | None = None
     text: ResponseTextConfig | None = None
     client_metadata: dict[str, str] | None = None
@@ -1035,43 +1063,103 @@ def _map_messages(body: ResponsesApiRequest) -> list[ChatCompletionMessageParam]
     return messages
 
 
-def _map_text_controls(body: ResponsesApiRequest) -> dict[str, Any]:
-    """Map ``text`` controls to Chat Completions parameters."""
-    params: dict[str, Any] = {}
-    if body.text is None:
-        return params
-    if body.text.verbosity is not None:
-        params["verbosity"] = body.text.verbosity
-    fmt = body.text.format
-    if isinstance(fmt, ResponseFormatTextJSONSchemaConfig):
-        params["response_format"] = {
-            "type": "json_schema",
-            "json_schema": {
-                "name": fmt.name,
-                "schema": fmt.schema_,
-                "strict": fmt.strict,
-            },
-        }
-    return params
+def _map_function_tool(parsed: FunctionTool) -> ChatCompletionFunctionToolParam:
+    """Responses API ``FunctionTool`` → Chat Completions nested ``function:{...}``."""
+    return ChatCompletionFunctionToolParam(
+        type="function",
+        function=FunctionDefinition(
+            name=parsed.name,
+            description=parsed.description or "",
+            parameters=parsed.parameters or {},
+            strict=parsed.strict,
+        ),
+    )
 
 
-def _map_tools(body: ResponsesApiRequest) -> dict[str, Any]:
-    """Map tool-related parameters to Chat Completions format."""
-    params: dict[str, Any] = {}
-    if body.tools:
-        params["tools"] = body.tools
-    if body.tool_choice != "auto":
-        params["tool_choice"] = body.tool_choice
-    if not body.parallel_tool_calls:
-        params["parallel_tool_calls"] = body.parallel_tool_calls
-    if body.reasoning and body.reasoning.effort:
-        params["reasoning_effort"] = body.reasoning.effort
-    if body.service_tier is not None:
-        params["service_tier"] = body.service_tier
-    if body.prompt_cache_key is not None:
-        params["prompt_cache_key"] = body.prompt_cache_key
-    params.update(_map_text_controls(body))
-    return params
+def _map_custom_format(
+    fmt: Text | Grammar,
+) -> CustomFormatText | CustomFormatGrammar:
+    """Map a Responses API ``format`` to Chat Completions custom format.
+
+    ``type: "text"`` passes through directly.
+    ``type: "grammar"`` nests ``definition`` and ``syntax`` under ``"grammar"``:
+
+    - Input:  ``{"type": "grammar", "definition": …, "syntax": …}``
+    - Output: ``{"type": "grammar", "grammar": {"definition": …, "syntax": …}}``
+    """
+    if fmt.type == "text":
+        return CustomFormatText(type="text")
+    return CustomFormatGrammar(
+        type="grammar",
+        grammar={
+            "definition": fmt.definition,
+            "syntax": fmt.syntax,
+        },
+    )
+
+
+def _map_custom_tool(parsed: CustomTool) -> ChatCompletionCustomToolParam:
+    """Responses API ``CustomTool`` → Chat Completions nested ``custom:{...}``."""
+    tool_custom: Custom = {
+        "name": parsed.name,
+    }
+    if parsed.description is not None:
+        tool_custom["description"] = parsed.description
+    if parsed.format is not None:
+        tool_custom["format"] = _map_custom_format(parsed.format)
+    return ChatCompletionCustomToolParam(
+        type="custom",
+        custom=tool_custom,
+    )
+
+
+def _map_tools(raw_tools: list[Any]) -> list[ChatCompletionToolUnionParam]:
+    """Map Responses API tools to Chat Completions format.
+
+    References:
+    - Responses API format: external/codex/codex-rs/tools/src/tool_spec.rs
+    - Chat Completions format: openai.types.chat.chat_completion_tool_union_param
+
+    """
+    result: list[ChatCompletionToolUnionParam] = []
+    for raw in raw_tools:
+        if not isinstance(raw, dict):
+            logger.warning(
+                "Non-dict tool entry in responses API request: %s — dropping.",
+                raw,
+            )
+            continue
+        tool_type = raw.get("type")
+        if tool_type == "function":
+            try:
+                parsed = FunctionTool.model_validate(raw)
+            except ValidationError as exc:
+                logger.warning(
+                    "Failed to parse function tool: %s — raw data: %s",
+                    exc,
+                    raw,
+                )
+                continue
+            result.append(_map_function_tool(parsed))
+        elif tool_type == "custom":
+            try:
+                parsed = CustomTool.model_validate(raw)
+            except ValidationError as exc:
+                logger.warning(
+                    "Failed to parse custom tool: %s — raw data: %s",
+                    exc,
+                    raw,
+                )
+                continue
+            result.append(_map_custom_tool(parsed))
+        else:
+            logger.warning(
+                "Unsupported tool type '%s' in responses API request — "
+                "dropping. Supported types: function, custom.",
+                tool_type,
+            )
+            continue
+    return result
 
 
 def _generate_response_id() -> str:
@@ -1286,7 +1374,29 @@ async def relay_stream(
     response_id = _generate_response_id()
     item_id = _generate_message_item_id()
     messages = _map_messages(body)
-    extra_kwargs = _map_tools(body)
+    stream_options: ChatCompletionStreamOptionsParam = ChatCompletionStreamOptionsParam(
+        include_usage=True
+    )
+    reasoning_effort: (
+        Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None | Omit
+    ) = Omit()
+    if body.reasoning:
+        reasoning_effort = body.reasoning.effort
+    verbosity: Literal["low", "medium", "high"] | None | Omit = Omit()
+    if body.text:
+        verbosity = body.text.verbosity
+    tools: list[ChatCompletionToolUnionParam] | Omit = _map_tools(body.tools) or Omit()
+    response_format: ResponseFormatJSONSchema | Omit = Omit()
+    if body.text and isinstance(body.text.format, ResponseFormatTextJSONSchemaConfig):
+        fmt = body.text.format
+        response_format = ResponseFormatJSONSchema(
+            type="json_schema",
+            json_schema={
+                "name": fmt.name,
+                "schema": fmt.schema_,
+                "strict": fmt.strict,
+            },
+        )
 
     yield _format_sse(
         ResponseCreatedEvent(
@@ -1301,8 +1411,17 @@ async def relay_stream(
                 model=model_id,
                 messages=messages,
                 stream=True,
-                stream_options={"include_usage": True},
-                **extra_kwargs,
+                stream_options=stream_options,
+                tools=tools,
+                tool_choice=body.tool_choice,
+                parallel_tool_calls=body.parallel_tool_calls,
+                reasoning_effort=reasoning_effort,
+                service_tier=body.service_tier,
+                verbosity=verbosity,
+                response_format=response_format,
+                prompt_cache_key=body.prompt_cache_key
+                if body.prompt_cache_key is not None
+                else Omit(),
             )
         except openai.APIError as e:
             yield _format_sse(
@@ -1318,9 +1437,8 @@ async def relay_stream(
             return
 
         usage_out: list[ResponseUsage | None] = [None]
-        # pyrefly cannot infer stream type through **extra_kwargs
-        events = _emit_content_events(stream, item_id, usage_out)  # type: ignore[type-var]
-        async for event in events:  # type: ignore[type-var]
+        events = _emit_content_events(stream, item_id, usage_out)
+        async for event in events:
             yield event
         final_usage = usage_out[0]
 

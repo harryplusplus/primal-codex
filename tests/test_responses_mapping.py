@@ -1,13 +1,28 @@
-"""Tests for the ``_map_messages()`` and ``_map_tools()`` helpers.
+"""Tests for the ``_map_messages()`` and tool mapping helpers.
 
 Verifies that a ``ResponsesApiRequest`` body is correctly mapped to
-Chat Completions API parameters.
+Chat Completions API parameters, and that tool definitions are
+correctly transformed.
 """
 
 from __future__ import annotations
 
+import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from _pytest.logging import LogCaptureFixture
+
+from openai.types.responses import CustomTool, FunctionTool
+from openai.types.shared.custom_tool_input_format import Grammar, Text
+
 from primal_codex.responses import (
+    CustomFormatGrammar,
+    CustomFormatText,
     ResponsesApiRequest,
+    _map_custom_format,
+    _map_custom_tool,
+    _map_function_tool,
     _map_messages,
     _map_tools,
 )
@@ -110,123 +125,217 @@ class TestMapMessages:
         assert len(messages) == 1
 
 
-class TestMapTools:
-    """Mapping Responses API parameters to Chat Completions tool/extra params."""
+class TestMapFunctionTool:
+    """Mapping ``type: "function"`` tools."""
 
-    def test_no_extra_params_by_default(self) -> None:
-        """Return empty dict when all optionals are default."""
-        params = _map_tools(_body())
-        assert params == {}
-
-    def test_tools_passthrough(self) -> None:
-        """Pass ``tools`` list through to Chat Completions."""
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_weather",
-                    "description": "Get the weather",
-                    "parameters": {"type": "object"},
-                },
-            }
-        ]
-        params = _map_tools(_body(tools=tools))
-        assert params["tools"] == tools
-
-    def test_tool_choice_non_auto(self) -> None:
-        """Pass ``tool_choice`` when not ``auto``."""
-        params = _map_tools(_body(tool_choice="none"))
-        assert params["tool_choice"] == "none"
-
-    def test_tool_choice_auto_omitted(self) -> None:
-        """Omit ``tool_choice`` when ``auto`` (default)."""
-        params = _map_tools(_body())
-        assert "tool_choice" not in params
-
-    def test_parallel_tool_calls_false(self) -> None:
-        """Pass ``parallel_tool_calls`` only when ``False``."""
-        params = _map_tools(_body(parallel_tool_calls=False))
-        assert params["parallel_tool_calls"] is False
-
-    def test_parallel_tool_calls_true_omitted(self) -> None:
-        """Omit ``parallel_tool_calls`` when ``True`` (default)."""
-        params = _map_tools(_body())
-        assert "parallel_tool_calls" not in params
-
-    def test_reasoning_effort_mapping(self) -> None:
-        """Map ``reasoning.effort`` to ``reasoning_effort`` string."""
-        params = _map_tools(_body(reasoning={"effort": "high", "summary": None}))
-        assert params["reasoning_effort"] == "high"
-
-    def test_reasoning_none_omitted(self) -> None:
-        """Omit ``reasoning_effort`` when ``reasoning`` is ``None``."""
-        params = _map_tools(_body())
-        assert "reasoning_effort" not in params
-
-    def test_service_tier_passthrough(self) -> None:
-        """Pass ``service_tier`` through when set."""
-        params = _map_tools(_body(service_tier="flex"))
-        assert params["service_tier"] == "flex"
-
-    def test_service_tier_none_omitted(self) -> None:
-        """Omit ``service_tier`` when ``None``."""
-        params = _map_tools(_body())
-        assert "service_tier" not in params
-
-    def test_prompt_cache_key_passthrough(self) -> None:
-        """Pass ``prompt_cache_key`` through when set."""
-        params = _map_tools(_body(prompt_cache_key="abc123"))
-        assert params["prompt_cache_key"] == "abc123"
-
-    def test_verbosity_mapping(self) -> None:
-        """Map ``text.verbosity`` to ``verbosity`` string."""
-        params = _map_tools(
-            _body(
-                text={
-                    "verbosity": "low",
-                    "format": None,
-                }
-            )
-        )
-        assert params["verbosity"] == "low"
-
-    def test_verbosity_medium(self) -> None:
-        """Map ``text.verbosity`` medium."""
-        params = _map_tools(
-            _body(
-                text={
-                    "verbosity": "medium",
-                    "format": None,
-                }
-            )
-        )
-        assert params["verbosity"] == "medium"
-
-    def test_verbosity_none_omitted(self) -> None:
-        """Omit ``verbosity`` when ``text`` is ``None``."""
-        params = _map_tools(_body())
-        assert "verbosity" not in params
-
-    def test_text_format_to_response_format(self) -> None:
-        """Map ``text.format`` to ``response_format`` JSON Schema."""
-        params = _map_tools(
-            _body(
-                text={
-                    "verbosity": None,
-                    "format": {
-                        "type": "json_schema",
-                        "strict": True,
-                        "schema": {"type": "object", "properties": {}},
-                        "name": "my_schema",
-                    },
-                }
-            )
-        )
-        assert params["response_format"] == {
-            "type": "json_schema",
-            "json_schema": {
-                "name": "my_schema",
-                "strict": True,
-                "schema": {"type": "object", "properties": {}},
+    def test_basic_function_tool(self) -> None:
+        """Map a basic function tool."""
+        raw = {
+            "type": "function",
+            "name": "get_weather",
+            "description": "Get the weather",
+            "strict": False,
+            "parameters": {
+                "type": "object",
+                "properties": {"location": {"type": "string"}},
+                "required": ["location"],
             },
         }
+        parsed = FunctionTool.model_validate(raw)
+        result = _map_function_tool(parsed)
+        assert result == {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get the weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}},
+                    "required": ["location"],
+                },
+                "strict": False,
+            },
+        }
+
+    def test_function_tool_minimal(self) -> None:
+        """Map with only required fields (no description, no parameters)."""
+        raw = {"type": "function", "name": "ping", "strict": False}
+        parsed = FunctionTool.model_validate(raw)
+        result = _map_function_tool(parsed)
+        assert result == {
+            "type": "function",
+            "function": {
+                "name": "ping",
+                "description": "",
+                "parameters": {},
+                "strict": False,
+            },
+        }
+
+    def test_function_tool_defer_loading_dropped(self) -> None:
+        """``defer_loading`` is absent in Chat Completions."""
+        raw = {
+            "type": "function",
+            "name": "lazy_load",
+            "description": "Lazy loaded",
+            "strict": True,
+            "defer_loading": True,
+            "parameters": {},
+        }
+        parsed = FunctionTool.model_validate(raw)
+        result = _map_function_tool(parsed)
+        # ``defer_loading`` must not appear in the output
+        assert "defer_loading" not in result["function"]
+
+
+class TestMapCustomFormat:
+    """Mapping custom format subtypes."""
+
+    def test_text_format_direct(self) -> None:
+        """``type: "text"`` passes through unchanged."""
+        raw = {"type": "text", "syntax": "", "definition": ""}
+        parsed = Text.model_validate(raw)
+        result = _map_custom_format(parsed)
+        assert result == CustomFormatText(type="text")
+
+    def test_grammar_format_nested(self) -> None:
+        """``type: "grammar"`` nests fields under ``"grammar"``."""
+        raw = {
+            "type": "grammar",
+            "syntax": "lark",
+            "definition": 'start: "hello"',
+        }
+        parsed = Grammar.model_validate(raw)
+        result = _map_custom_format(parsed)
+        assert result == CustomFormatGrammar(
+            type="grammar",
+            grammar={
+                "definition": 'start: "hello"',
+                "syntax": "lark",
+            },
+        )
+
+
+class TestMapCustomTool:
+    """Mapping ``type: "custom"`` tools."""
+
+    def test_basic_custom_tool(self) -> None:
+        """Map a custom tool without format."""
+        raw = {"type": "custom", "name": "exec", "description": "Execute"}
+        parsed = CustomTool.model_validate(raw)
+        result = _map_custom_tool(parsed)
+        assert result == {
+            "type": "custom",
+            "custom": {
+                "name": "exec",
+                "description": "Execute",
+            },
+        }
+
+    def test_custom_tool_with_text_format(self) -> None:
+        """Map a custom tool with ``format.type: "text"``."""
+        raw = {
+            "type": "custom",
+            "name": "exec",
+            "description": "Execute",
+            "format": {"type": "text", "syntax": "", "definition": ""},
+        }
+        parsed = CustomTool.model_validate(raw)
+        result = _map_custom_tool(parsed)
+        assert result == {
+            "type": "custom",
+            "custom": {
+                "name": "exec",
+                "description": "Execute",
+                "format": {"type": "text"},
+            },
+        }
+
+    def test_custom_tool_with_grammar_format(self) -> None:
+        """Map a custom tool with ``format.type: "grammar"``."""
+        raw = {
+            "type": "custom",
+            "name": "exec",
+            "description": "Execute",
+            "format": {
+                "type": "grammar",
+                "syntax": "lark",
+                "definition": 'start: "a"',
+            },
+        }
+        parsed = CustomTool.model_validate(raw)
+        result = _map_custom_tool(parsed)
+        assert result == {
+            "type": "custom",
+            "custom": {
+                "name": "exec",
+                "description": "Execute",
+                "format": {
+                    "type": "grammar",
+                    "grammar": {
+                        "definition": 'start: "a"',
+                        "syntax": "lark",
+                    },
+                },
+            },
+        }
+
+
+class TestMapTools:
+    """Top-level tool mapping dispatcher."""
+
+    def test_function_and_custom(self) -> None:
+        """Map both ``function`` and ``custom`` tools."""
+        raw_tools = [
+            {"type": "function", "name": "f1", "strict": False, "parameters": {}},
+            {"type": "custom", "name": "c1"},
+        ]
+        result = _map_tools(raw_tools)
+        assert len(result) == 2
+        assert result[0]["type"] == "function"
+        assert result[1]["type"] == "custom"
+
+    def test_unsupported_types_skipped(self, caplog: LogCaptureFixture) -> None:
+        """Non-mappable types are skipped with a warning."""
+        caplog.set_level(logging.WARNING)
+        raw_tools = [
+            {"type": "function", "name": "f1", "strict": False, "parameters": {}},
+            {"type": "namespace", "name": "ns", "description": "", "tools": []},
+            {"type": "custom", "name": "c1"},
+            {"type": "local_shell"},
+            {"type": "web_search"},
+        ]
+        result = _map_tools(raw_tools)
+        assert len(result) == 2
+        assert len(caplog.records) == 3
+        for record in caplog.records:
+            assert record.levelname == "WARNING"
+            assert "Unsupported tool type" in record.message
+
+    def test_non_dict_skipped(self, caplog: LogCaptureFixture) -> None:
+        """Non-dict entries are skipped with a warning."""
+        caplog.set_level(logging.WARNING)
+        raw_tools: list = [
+            "not_a_dict",
+            {"type": "function", "name": "f1", "strict": False, "parameters": {}},
+        ]
+        result = _map_tools(raw_tools)
+        assert len(result) == 1
+        assert len(caplog.records) == 1
+        assert "Non-dict tool entry" in caplog.records[0].message
+
+    def test_malformed_function_skipped(self, caplog: LogCaptureFixture) -> None:
+        """A function tool that fails validation is skipped."""
+        caplog.set_level(logging.WARNING)
+        raw_tools: list = [
+            {"type": "function", "name": 123},  # name must be str
+            {"type": "function", "name": "ok", "strict": False, "parameters": {}},
+        ]
+        result = _map_tools(raw_tools)
+        assert len(result) == 1
+        assert len(caplog.records) == 1
+        assert "Failed to parse function tool" in caplog.records[0].message
+
+    def test_empty_tools(self) -> None:
+        """Empty input returns empty list."""
+        assert _map_tools([]) == []
