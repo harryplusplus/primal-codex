@@ -23,8 +23,6 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from primal_codex.paths import PROMPT_PATH
-
 
 class ReasoningEffort(StrEnum):
     """codex ReasoningEffort — serialised lowercase."""
@@ -249,15 +247,11 @@ class ModelConfig(BaseModel):
     supports_search_tool: bool | None = None
 
 
-def _default_base_instructions() -> str:
-    """Read the built-in system prompt shipped with Primal Codex."""
-    return PROMPT_PATH.read_text(encoding="utf-8")
-
-
 def enrich_model(
     model_id: str,
     provider_id: str,
     cfg: ModelConfig,
+    default_base_instructions: str = "",
 ) -> ModelInfo:
     """Build a complete ``ModelInfo`` from a user-supplied ``ModelConfig``.
 
@@ -265,6 +259,8 @@ def enrich_model(
         model_id: Model key under ``[providers.<provider_id>.models]`` in TOML.
         provider_id: Provider key under ``[providers]`` in TOML.
         cfg: User-supplied model configuration (all fields optional).
+        default_base_instructions: Built-in prompt used when
+            ``cfg.base_instructions`` is None.
 
     Returns:
         A fully-populated ``ModelInfo`` ready for wire serialisation.
@@ -290,7 +286,7 @@ def enrich_model(
         upgrade=cfg.upgrade,
         base_instructions=cfg.base_instructions
         if cfg.base_instructions is not None
-        else _default_base_instructions(),
+        else default_base_instructions,
         model_messages=cfg.model_messages,
         supports_reasoning_summaries=cfg.supports_reasoning_summaries
         if cfg.supports_reasoning_summaries is not None

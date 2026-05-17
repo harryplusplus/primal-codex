@@ -18,7 +18,7 @@ import tomlkit
 from pydantic import BaseModel
 
 from primal_codex.models import ModelConfig, ModelInfo, enrich_model
-from primal_codex.paths import resolve_primal_codex_config_path
+from primal_codex.paths import PROMPT_PATH, resolve_primal_codex_config_path
 
 DEFAULT_CONFIG = """\
 # Primal Codex configuration.
@@ -143,10 +143,11 @@ class PrimalCodexConfig(BaseModel):
 
 def compute_model_infos(config: PrimalCodexConfig) -> list[ModelInfo]:
     """Enrich every raw ``ModelConfig`` into a complete ``ModelInfo``."""
+    default_prompt = PROMPT_PATH.read_text(encoding="utf-8")
     infos: list[ModelInfo] = []
     for pid, provider in config.providers.items():
         for key, cfg in provider.models.items():
-            infos.append(enrich_model(key, pid, cfg))
+            infos.append(enrich_model(key, pid, cfg, default_prompt))
     infos.sort(key=lambda m: m.priority)
     return infos
 
