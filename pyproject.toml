@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff~=0.15.13", "pyrefly~=1.0.0"]
+dev = ["ruff~=0.15.13", "pyrefly~=1.0.0", "pytest~=9.0.3"]
 
 [project.scripts]
 primal-codex = "primal_codex.cli:main"
