@@ -22,10 +22,14 @@ PRIMAL_CODEX_PROVIDER_ID = "primal-codex"
 
 
 class _DeleteMarker:
-    """Sentinel type for marking a TOML key to be removed."""
+    """Marker for a TOML key to be removed, optionally with a reason.
 
+    When a non-empty ``reason`` is provided it is included in the removal
+    message shown to the user.
+    """
 
-_DELETE = _DeleteMarker()
+    def __init__(self, reason: str = "") -> None:
+        self.reason = reason
 
 
 def _get_toml_value(doc: TOMLDocument, key: str) -> object:
@@ -105,9 +109,7 @@ def run_codex() -> None:
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.name": PRIMAL_CODEX_PROVIDER_ID,
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.base_url": server_url,
         f"model_providers.{PRIMAL_CODEX_PROVIDER_ID}.supports_websockets": False,
-        # Primal Codex manages models dynamically via its own endpoints; a
-        # static catalog would interfere.
-        "model_catalog_json": _DELETE,
+        "model_catalog_json": _DeleteMarker("Primal Codex manages models dynamically"),
     }
 
     # 4. Detect whether any change is needed.
@@ -137,6 +139,9 @@ def run_codex() -> None:
     typer.echo(f"Updated Codex config at {codex_path}")
     for key, value in desired.items():
         if isinstance(value, _DeleteMarker):
-            typer.echo(f"  Removed {key} (Primal Codex manages models dynamically)")
+            msg = f"  Removed {key}"
+            if value.reason:
+                msg += f" ({value.reason})"
+            typer.echo(msg)
         else:
             typer.echo(f"  Set {key} = {value!r}")
