@@ -21,7 +21,6 @@ from typing import Any, Literal, NotRequired, TypeAlias, TypedDict
 import openai
 from openai import AsyncOpenAI, AsyncStream, Omit
 from openai.types import (
-    ReasoningEffort,
     ResponseFormatJSONObject,
     ResponseFormatText,
     shared_params,
@@ -61,9 +60,6 @@ from openai.types.chat.chat_completion_function_tool_param import (
 )
 from openai.types.chat.chat_completion_message_param import (
     ChatCompletionMessageParam,
-)
-from openai.types.chat.chat_completion_stream_options_param import (
-    ChatCompletionStreamOptionsParam,
 )
 from openai.types.chat.chat_completion_system_message_param import (
     ChatCompletionSystemMessageParam,
@@ -986,7 +982,7 @@ class ResponsesApiRequest(BaseModel):
 
     model: str
     input: list[EasyInputMessage]
-    instructions: str = ""
+    instructions: str | None = None
     tools: list[Any] = []
     tool_choice: str
     parallel_tool_calls: bool
@@ -1039,14 +1035,14 @@ def _map_item_content(
     ]
 
 
-def _map_messages(body: ResponsesApiRequest) -> list[ChatCompletionMessageParam]:
+def _map_messages(instructions: str | None, input) -> list[ChatCompletionMessageParam]:
     """Map input items to Chat Completions messages."""
     messages: list[ChatCompletionMessageParam] = []
-    if body.instructions:
+    if instructions:
         messages.append(
-            ChatCompletionSystemMessageParam(role="system", content=body.instructions)
+            ChatCompletionSystemMessageParam(role="system", content=instructions)
         )
-    for item in body.input:
+    for item in input:
         mapped = _map_item_content(item.content)
         if not mapped:
             continue
@@ -1378,16 +1374,6 @@ async def relay_stream(
     response_id = _generate_response_id()
     item_id = _generate_message_item_id()
 
-    stream_options: ChatCompletionStreamOptionsParam = {"include_usage": True}
-
-    reasoning_effort: ReasoningEffort | None | Omit = Omit()
-    if body.reasoning:
-        reasoning_effort = body.reasoning.effort
-
-    verbosity: Literal["low", "medium", "high"] | None | Omit = Omit()
-    if body.text:
-        verbosity = body.text.verbosity
-
     response_format: ResponseFormat | Omit = Omit()
     if body.text:
         if isinstance(body.text.format, ResponseFormatText):
@@ -1408,11 +1394,7 @@ async def relay_stream(
                 json_schema=json_schema,
             )
 
-    prompt_cache_key: str | Omit = Omit()
-    if body.prompt_cache_key is not None:
-        prompt_cache_key = body.prompt_cache_key
-
-    messages = _map_messages(body)
+    messages = _map_messages(body.instructions, body.input)
 
     tools: list[ChatCompletionToolUnionParam] | Omit = _map_tools(body.tools) or Omit()
 
@@ -1428,15 +1410,17 @@ async def relay_stream(
             stream = await client.chat.completions.create(
                 model=model_id,
                 stream=True,
-                stream_options=stream_options,
-                reasoning_effort=reasoning_effort,
+                stream_options={"include_usage": True},
+                reasoning_effort=body.reasoning.effort if body.reasoning else Omit(),
                 parallel_tool_calls=body.parallel_tool_calls,
                 service_tier=body.service_tier,
                 messages=messages,
                 tools=tools,
-                verbosity=verbosity,
+                verbosity=body.text.verbosity if body.text else Omit(),
                 response_format=response_format,
-                prompt_cache_key=prompt_cache_key,
+                prompt_cache_key=body.prompt_cache_key
+                if body.prompt_cache_key is not None
+                else Omit(),
             )
         except openai.APIError as e:
             yield _format_sse(
