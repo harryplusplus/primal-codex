@@ -301,7 +301,7 @@ async def handle_responses(request: Request) -> JSONResponse | StreamingResponse
 
     api_key = provider.resolve_api_key()
 
-    response_id = f"resp_{_random_hex(25)}"
+    response_id = _generate_response_id()
 
     return StreamingResponse(
         _relay_stream(body, provider.base_url, api_key, response_id),
@@ -313,9 +313,59 @@ async def handle_responses(request: Request) -> JSONResponse | StreamingResponse
     )
 
 
-def _random_hex(bytes_count: int) -> str:
-    """Generate a hex string from ``bytes_count`` random bytes."""
-    return os.urandom(bytes_count).hex()
+def _generate_response_id() -> str:
+    """Generate a unique response ID.
+
+    Sample: resp_0309c0d6cb4ff519016a032143c2288191b3759a2e031f11b2
+    """
+    return f"resp_{os.urandom(25).hex()}"
+
+
+def _generate_reasoning_item_id() -> str:
+    """Generate a unique reasoning item ID.
+
+    Sample: rs_0309c0d6cb4ff519016a03214c9eb08191b938b46b170f9d90
+    """
+    return f"rs_{os.urandom(25).hex()}"
+
+
+def _generate_message_item_id() -> str:
+    """Generate a unique message item ID.
+
+    Sample: msg_0309c0d6cb4ff519016a03214e4e7c8191bf036ec8113050a7
+    """
+    return f"msg_{os.urandom(25).hex()}"
+
+
+def _generate_function_call_item_id() -> str:
+    """Generate a unique function call item ID.
+
+    Sample: fc_0309c0d6cb4ff519016a032152eb1c819182b3994c61de195b
+    """
+    return f"fc_{os.urandom(25).hex()}"
+
+
+# 24-char [a-zA-Z0-9] using rejection sampling for unbiased distribution.
+_BASE62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_CALL_ID_CHARS = 24
+_CALL_ID_REJECT_THRESHOLD = 248
+
+
+def _generate_call_id() -> str:
+    """Generate a unique call ID (``call_`` + 24 base62 chars, rejection-sampled).
+
+    Sample: call_ueWI5DaDk7YLNXdK8uBWyUTg
+
+    Uses rejection sampling (byte < 248 → byte % 62) for unbiased output.
+    """
+    result: list[str] = []
+    while len(result) < _CALL_ID_CHARS:
+        for b in os.urandom(32):
+            if b < _CALL_ID_REJECT_THRESHOLD:
+                result.append(_BASE62[b % 62])
+                if len(result) == _CALL_ID_CHARS:
+                    break
+    return f"call_{''.join(result)}"
 
 
 def _format_sse(event_name: str, data: dict[str, Any]) -> str:
@@ -470,7 +520,7 @@ async def _relay_stream(
 ) -> AsyncIterator[str]:
     """Forward the mapped Chat Completions request using the OpenAI SDK."""
     upstream_body = responses_to_chat_completions(body)
-    item_id = f"msg_{_random_hex(25)}"
+    item_id = _generate_message_item_id()
 
     yield _format_sse(
         "response.created",
