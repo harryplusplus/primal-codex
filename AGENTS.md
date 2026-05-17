@@ -21,3 +21,15 @@
   - `uv run ruff format <foo.py> <bar.py>`
   - `uv run ruff check --fix <foo.py> <bar.py>`
   - `uv run pyrefly check <foo.py> <bar.py>`
+
+## (TODO) 테스트
+
+### 유닛 테스트
+
+Typer, FastAPI의 테스트 기능을 적극 활용해야합니다.
+
+### 통합 테스트
+
+`codex` CLI, 실제 LLM API를 시나리오 별로 실행하는 통합 테스트가 필요합니다.
+
+텍스트, 이미지, 도구 호출, 멀티턴 등 기능 누락이 발생할 때마다 통합 테스트를 추가해야 합니다.

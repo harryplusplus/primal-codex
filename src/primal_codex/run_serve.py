@@ -9,7 +9,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from primal_codex.config import PrimalCodexConfig, load_config
+from primal_codex.config import PrimalCodexConfig, compute_model_infos, load_config
 from primal_codex.models import ModelInfo, ModelsResponse
 
 
@@ -45,28 +45,20 @@ class ActiveRelays:
             pass
 
 
-def _to_flat_models(config: PrimalCodexConfig) -> list[ModelInfo]:
-    """Flatten ``providers.*.models.*`` into a flat list sorted by priority."""
-    infos: list[ModelInfo] = []
-    for provider in config.providers.values():
-        infos.extend(provider.models.values())
-    infos.sort(key=lambda m: m.priority, reverse=True)
-    return infos
-
-
-def _lookup_model(config: PrimalCodexConfig, slug: str) -> ModelInfo | None:
-    """Look up a model by its qualified slug."""
-    for provider in config.providers.values():
-        for mi in provider.models.values():
-            if mi.slug == slug:
-                return mi
+def _lookup_model(infos: list[ModelInfo], slug: str) -> ModelInfo | None:
+    """Look up a model by its qualified slug from a model list."""
+    for mi in infos:
+        if mi.slug == slug:
+            return mi
     return None
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     """Load config once on startup; drain relays on shutdown."""
-    _app.state.primal_config = load_config()
+    primal_config = load_config()
+    _app.state.primal_config = primal_config
+    _app.state.model_infos = compute_model_infos(primal_config)
     _app.state.relays = ActiveRelays()
     yield
     await _app.state.relays.wait_all()
@@ -81,6 +73,19 @@ async def healthz() -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+# Fields with ``skip_serializing_if = "Option::is_none"`` in upstream Rust.
+# Safe to omit from JSON when ``None`` — Codex client uses its own default.
+_SKIPPABLE_NONE_FIELDS = frozenset(
+    {
+        "default_reasoning_level",
+        "model_messages",
+        "context_window",
+        "max_context_window",
+        "auto_compact_token_limit",
+    }
+)
+
+
 @app.get(
     "/models",
     summary="List Models",
@@ -90,11 +95,14 @@ async def healthz() -> JSONResponse:
     tags=["models"],
 )
 def models(request: Request) -> JSONResponse:
-    """List all models — reads from cached config, omits unset fields."""
-    config: PrimalCodexConfig = request.app.state.primal_config
-    return JSONResponse(
-        ModelsResponse(models=_to_flat_models(config)).model_dump(exclude_none=True)
-    )
+    """List all models — reads from cached config, omits skippable null fields."""
+    model_infos: list[ModelInfo] = request.app.state.model_infos
+    dumped = ModelsResponse(models=model_infos).model_dump()
+    for m in dumped["models"]:
+        for field in _SKIPPABLE_NONE_FIELDS & m.keys():
+            if m[field] is None:
+                del m[field]
+    return JSONResponse(dumped)
 
 
 @app.post("/responses", response_model=None)

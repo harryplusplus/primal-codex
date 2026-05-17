@@ -90,3 +90,7 @@ Codex 클라이언트 <-> Responses API (SSE /responses) <-> Primal Codex 서버
 
 Responses API 요청을 Chat Completions 요청으로 변환해 제공자로 전달합니다.
 Codex가 준 모델 slug는 `<provider_id>/<model_id>`로 분해해 올바른 제공자의 API를 호출합니다.
+
+#### (TODO) OpenAPI
+
+`<base_url>/openapi.json`과 같은 기능이 있어야 합니다. FastAPI 기능 확인을 해야합니다.

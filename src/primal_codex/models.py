@@ -1,13 +1,20 @@
-"""Codex SOT types for the ``/models`` endpoint.
+"""Primal Codex model layer.
 
-Every type, field, enum variant, optionality rule, default value, and
-serialization name in this module is derived from codex-rs:
+Two roles live in this module, separated by convention:
 
-    codex-rs/protocol/src/openai_models.rs
-    codex-rs/protocol/src/config_types.rs
+1. **Wire format mirror** (``ModelInfo`` + supporting types)
+   Every type, field, enum variant, optionality rule, default value, and
+   serialization name is derived from codex-rs:
 
-Do NOT add, remove, or rename anything here without also updating the
-upstream source.
+       codex-rs/protocol/src/openai_models.rs
+       codex-rs/protocol/src/config_types.rs
+
+   Do NOT add, remove, or rename anything in ``ModelInfo`` without also
+   updating the upstream source.
+
+2. **User input schema** (``ModelConfig``)
+   All-optional model configuration that users write in their TOML file.
+   The server enriches it into a complete ``ModelInfo`` at load time.
 """
 
 from __future__ import annotations
@@ -15,6 +22,8 @@ from __future__ import annotations
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+from primal_codex.paths import PROMPT_PATH
 
 
 class ReasoningEffort(StrEnum):
@@ -91,9 +100,6 @@ class Verbosity(StrEnum):
     high = "high"
 
 
-# ── Structs ────────────────────────────────────────────────────────────────
-
-
 class ReasoningEffortPreset(BaseModel):
     """codex ReasoningEffortPreset."""
 
@@ -162,44 +168,39 @@ class ModelInfo(BaseModel):
     enum variant names, exactly matching codex-rs serialisation.
     """
 
-    slug: str = ""
+    slug: str
     display_name: str
-    description: str | None = None
+    description: str | None
     default_reasoning_level: ReasoningEffort | None = None
-    supported_reasoning_levels: list[ReasoningEffortPreset] = Field(
-        default_factory=list
-    )
-    shell_type: ConfigShellToolType = ConfigShellToolType.shell_command
-    visibility: ModelVisibility = ModelVisibility.list
-    supported_in_api: bool = True
-    priority: int = 0
+    supported_reasoning_levels: list[ReasoningEffortPreset]
+    shell_type: ConfigShellToolType
+    visibility: ModelVisibility
+    supported_in_api: bool
+    priority: int
     additional_speed_tiers: list[str] = Field(default_factory=list)
     service_tiers: list[ModelServiceTier] = Field(default_factory=list)
-    availability_nux: ModelAvailabilityNux | None = None
-    upgrade: ModelInfoUpgrade | None = None
-    base_instructions: str | None = None
+    availability_nux: ModelAvailabilityNux | None
+    upgrade: ModelInfoUpgrade | None
+    base_instructions: str
     model_messages: ModelMessages | None = None
-    supports_reasoning_summaries: bool = False
+    supports_reasoning_summaries: bool
     default_reasoning_summary: ReasoningSummary = ReasoningSummary.auto
-    support_verbosity: bool = False
-    default_verbosity: Verbosity | None = None
-    apply_patch_tool_type: ApplyPatchToolType | None = None
+    support_verbosity: bool
+    default_verbosity: Verbosity | None
+    apply_patch_tool_type: ApplyPatchToolType | None
     web_search_tool_type: WebSearchToolType = WebSearchToolType.text
-    truncation_policy: TruncationPolicyConfig = Field(
-        default_factory=lambda: TruncationPolicyConfig(
-            mode=TruncationMode.bytes, limit=10_000
-        )
-    )
-    supports_parallel_tool_calls: bool = False
+    truncation_policy: TruncationPolicyConfig
+    supports_parallel_tool_calls: bool
     supports_image_detail_original: bool = False
     context_window: int | None = None
     max_context_window: int | None = None
     auto_compact_token_limit: int | None = None
     effective_context_window_percent: int = 95
-    experimental_supported_tools: list[str] = Field(default_factory=list)
+    experimental_supported_tools: list[str]
     input_modalities: list[InputModality] = Field(
         default_factory=lambda: [InputModality.text, InputModality.image]
     )
+    used_fallback_model_metadata: bool = False
     supports_search_tool: bool = False
 
 
@@ -207,3 +208,119 @@ class ModelsResponse(BaseModel):
     """codex ModelsResponse — response wrapper for ``GET /models``."""
 
     models: list[ModelInfo]
+
+
+class ModelConfig(BaseModel):
+    """User-supplied model configuration from TOML.
+
+    All fields are optional — the server provides sensible defaults when a
+    field is omitted (set to ``None``).
+    """
+
+    display_name: str | None = None
+    description: str | None = None
+    default_reasoning_level: ReasoningEffort | None = None
+    supported_reasoning_levels: list[ReasoningEffortPreset] | None = None
+    shell_type: ConfigShellToolType | None = None
+    visibility: ModelVisibility | None = None
+    supported_in_api: bool | None = None
+    priority: int | None = None
+    additional_speed_tiers: list[str] | None = None
+    service_tiers: list[ModelServiceTier] | None = None
+    availability_nux: ModelAvailabilityNux | None = None
+    upgrade: ModelInfoUpgrade | None = None
+    base_instructions: str | None = None
+    model_messages: ModelMessages | None = None
+    supports_reasoning_summaries: bool | None = None
+    default_reasoning_summary: ReasoningSummary | None = None
+    support_verbosity: bool | None = None
+    default_verbosity: Verbosity | None = None
+    apply_patch_tool_type: ApplyPatchToolType | None = None
+    web_search_tool_type: WebSearchToolType | None = None
+    truncation_policy: TruncationPolicyConfig | None = None
+    supports_parallel_tool_calls: bool | None = None
+    supports_image_detail_original: bool | None = None
+    context_window: int | None = None
+    max_context_window: int | None = None
+    auto_compact_token_limit: int | None = None
+    effective_context_window_percent: int | None = None
+    experimental_supported_tools: list[str] | None = None
+    input_modalities: list[InputModality] | None = None
+    supports_search_tool: bool | None = None
+
+
+def _default_base_instructions() -> str:
+    """Read the built-in system prompt shipped with Primal Codex."""
+    return PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def enrich_model(
+    model_id: str,
+    provider_id: str,
+    cfg: ModelConfig,
+) -> ModelInfo:
+    """Build a complete ``ModelInfo`` from a user-supplied ``ModelConfig``.
+
+    Args:
+        model_id: Model key under ``[providers.<provider_id>.models]`` in TOML.
+        provider_id: Provider key under ``[providers]`` in TOML.
+        cfg: User-supplied model configuration (all fields optional).
+
+    Returns:
+        A fully-populated ``ModelInfo`` ready for wire serialisation.
+
+    """
+    slug = f"{provider_id}/{model_id}"
+
+    return ModelInfo(
+        slug=slug,
+        display_name=cfg.display_name or model_id,
+        description=cfg.description,
+        default_reasoning_level=cfg.default_reasoning_level,
+        supported_reasoning_levels=cfg.supported_reasoning_levels or [],
+        shell_type=cfg.shell_type or ConfigShellToolType.shell_command,
+        visibility=cfg.visibility or ModelVisibility.list,
+        supported_in_api=cfg.supported_in_api
+        if cfg.supported_in_api is not None
+        else True,
+        priority=cfg.priority if cfg.priority is not None else 0,
+        additional_speed_tiers=cfg.additional_speed_tiers or [],
+        service_tiers=cfg.service_tiers or [],
+        availability_nux=cfg.availability_nux,
+        upgrade=cfg.upgrade,
+        base_instructions=cfg.base_instructions
+        if cfg.base_instructions is not None
+        else _default_base_instructions(),
+        model_messages=cfg.model_messages,
+        supports_reasoning_summaries=cfg.supports_reasoning_summaries
+        if cfg.supports_reasoning_summaries is not None
+        else False,
+        default_reasoning_summary=cfg.default_reasoning_summary
+        or ReasoningSummary.auto,
+        support_verbosity=cfg.support_verbosity
+        if cfg.support_verbosity is not None
+        else False,
+        default_verbosity=cfg.default_verbosity,
+        apply_patch_tool_type=cfg.apply_patch_tool_type,
+        web_search_tool_type=cfg.web_search_tool_type or WebSearchToolType.text,
+        truncation_policy=cfg.truncation_policy
+        or TruncationPolicyConfig(mode=TruncationMode.bytes, limit=10_000),
+        supports_parallel_tool_calls=cfg.supports_parallel_tool_calls
+        if cfg.supports_parallel_tool_calls is not None
+        else False,
+        supports_image_detail_original=cfg.supports_image_detail_original
+        if cfg.supports_image_detail_original is not None
+        else False,
+        context_window=cfg.context_window,
+        max_context_window=cfg.max_context_window,
+        auto_compact_token_limit=cfg.auto_compact_token_limit,
+        effective_context_window_percent=cfg.effective_context_window_percent
+        if cfg.effective_context_window_percent is not None
+        else 95,
+        experimental_supported_tools=cfg.experimental_supported_tools or [],
+        input_modalities=cfg.input_modalities
+        or [InputModality.text, InputModality.image],
+        supports_search_tool=cfg.supports_search_tool
+        if cfg.supports_search_tool is not None
+        else False,
+    )
