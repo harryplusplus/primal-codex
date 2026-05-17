@@ -218,13 +218,15 @@ class ModelConfig(BaseModel):
     display_name: str | None = None
     description: str | None = None
     default_reasoning_level: ReasoningEffort | None = None
-    supported_reasoning_levels: list[ReasoningEffortPreset] | None = None
+    supported_reasoning_levels: list[ReasoningEffortPreset] = Field(
+        default_factory=list
+    )
     shell_type: ConfigShellToolType | None = None
     visibility: ModelVisibility | None = None
     supported_in_api: bool | None = None
     priority: int | None = None
-    additional_speed_tiers: list[str] | None = None
-    service_tiers: list[ModelServiceTier] | None = None
+    additional_speed_tiers: list[str] = Field(default_factory=list)
+    service_tiers: list[ModelServiceTier] = Field(default_factory=list)
     availability_nux: ModelAvailabilityNux | None = None
     upgrade: ModelInfoUpgrade | None = None
     base_instructions: str | None = None
@@ -242,8 +244,10 @@ class ModelConfig(BaseModel):
     max_context_window: int | None = None
     auto_compact_token_limit: int | None = None
     effective_context_window_percent: int | None = None
-    experimental_supported_tools: list[str] | None = None
-    input_modalities: list[InputModality] | None = None
+    experimental_supported_tools: list[str] = Field(default_factory=list)
+    input_modalities: list[InputModality] = Field(
+        default_factory=lambda: [InputModality.text, InputModality.image]
+    )
     supports_search_tool: bool | None = None
 
 
@@ -273,15 +277,15 @@ def enrich_model(
         display_name=cfg.display_name or slug,
         description=cfg.description,
         default_reasoning_level=cfg.default_reasoning_level,
-        supported_reasoning_levels=cfg.supported_reasoning_levels or [],
+        supported_reasoning_levels=cfg.supported_reasoning_levels,
         shell_type=cfg.shell_type or ConfigShellToolType.shell_command,
         visibility=cfg.visibility or ModelVisibility.list,
         supported_in_api=cfg.supported_in_api
         if cfg.supported_in_api is not None
         else True,
         priority=cfg.priority if cfg.priority is not None else 0,
-        additional_speed_tiers=cfg.additional_speed_tiers or [],
-        service_tiers=cfg.service_tiers or [],
+        additional_speed_tiers=cfg.additional_speed_tiers,
+        service_tiers=cfg.service_tiers,
         availability_nux=cfg.availability_nux,
         upgrade=cfg.upgrade,
         base_instructions=cfg.base_instructions
@@ -313,9 +317,8 @@ def enrich_model(
         effective_context_window_percent=cfg.effective_context_window_percent
         if cfg.effective_context_window_percent is not None
         else 95,
-        experimental_supported_tools=cfg.experimental_supported_tools or [],
-        input_modalities=cfg.input_modalities
-        or [InputModality.text, InputModality.image],
+        experimental_supported_tools=cfg.experimental_supported_tools,
+        input_modalities=cfg.input_modalities,
         supports_search_tool=cfg.supports_search_tool
         if cfg.supports_search_tool is not None
         else False,
