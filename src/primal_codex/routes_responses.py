@@ -93,7 +93,7 @@ async def responses(
     response_id = generate_response_id()
 
     return StreamingResponse(
-        relay_stream(body, provider.base_url, api_key, response_id),
+        relay_stream(body, model_id, provider.base_url, api_key, response_id),
         media_type="text/event-stream",
         headers={
             "cache-control": "no-cache",

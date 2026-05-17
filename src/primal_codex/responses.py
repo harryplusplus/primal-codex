@@ -218,7 +218,9 @@ def _map_tools(body: ResponsesApiRequest) -> dict[str, Any]:
     return params
 
 
-def responses_to_chat_completions(body: ResponsesApiRequest) -> dict[str, Any]:
+def responses_to_chat_completions(
+    body: ResponsesApiRequest, model_id: str
+) -> dict[str, Any]:
     """Map a ``ResponsesApiRequest`` to a Chat Completions request body.
 
     The following Responses API fields have no Chat Completions equivalent
@@ -235,7 +237,6 @@ def responses_to_chat_completions(body: ResponsesApiRequest) -> dict[str, Any]:
       tracestate). Not passed to the upstream; could be forwarded as custom
       HTTP headers if the upstream supports distributed tracing.
     """
-    _, model_id = body.model.split("/", 1)
     result: dict[str, Any] = {
         "model": model_id,
         "messages": _map_messages(body),
@@ -446,12 +447,13 @@ async def _emit_content_events(
 
 async def relay_stream(
     body: ResponsesApiRequest,
+    model_id: str,
     base_url: str,
     api_key: str | None,
     response_id: str,
 ) -> AsyncIterator[str]:
     """Forward the mapped Chat Completions request using the OpenAI SDK."""
-    upstream_body = responses_to_chat_completions(body)
+    upstream_body = responses_to_chat_completions(body, model_id)
     item_id = _generate_message_item_id()
 
     yield _format_sse(
