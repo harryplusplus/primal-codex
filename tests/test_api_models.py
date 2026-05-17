@@ -22,17 +22,16 @@ if TYPE_CHECKING:
 import pytest
 from fastapi.testclient import TestClient
 
-from primal_codex.config import PrimalCodexConfig, ProviderConfig, compute_model_infos
+from primal_codex.config import PrimalCodexConfig, ProviderConfig, compute_model_map
 from primal_codex.models import ModelConfig
-from primal_codex.run_serve import ActiveRelays, AppContext, app
+from primal_codex.run_serve import AppContext, app
 
 
 def _setup_app_ctx(config: PrimalCodexConfig) -> None:
     """Set the module-level app context for testing."""
     app.state.ctx = AppContext(
         primal_config=config,
-        model_infos=compute_model_infos(config),
-        relays=ActiveRelays(),
+        model_map=compute_model_map(config),
     )
 
 

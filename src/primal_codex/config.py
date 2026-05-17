@@ -58,15 +58,19 @@ class PrimalCodexConfig(BaseModel):
     providers: dict[str, ProviderConfig] = {}
 
 
-def compute_model_infos(config: PrimalCodexConfig) -> list[ModelInfo]:
-    """Enrich every raw ``ModelConfig`` into a complete ``ModelInfo``."""
+def compute_model_map(config: PrimalCodexConfig) -> dict[str, ModelInfo]:
+    """Build a slug-indexed map from every raw ``ModelConfig``.
+
+    Insertion order follows ascending priority so that
+    ``list(result.values())`` is already sorted.
+    """
     default_prompt = PROMPT_PATH.read_text(encoding="utf-8")
-    infos: list[ModelInfo] = []
+    entries: list[ModelInfo] = []
     for pid, provider in config.providers.items():
         for key, cfg in provider.models.items():
-            infos.append(enrich_model(key, pid, cfg, default_prompt))
-    infos.sort(key=lambda m: m.priority)
-    return infos
+            entries.append(enrich_model(key, pid, cfg, default_prompt))
+    entries.sort(key=lambda m: m.priority)
+    return {m.slug: m for m in entries}
 
 
 def load_config() -> PrimalCodexConfig:

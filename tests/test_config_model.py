@@ -3,7 +3,7 @@
 Covers:
 1. ``load_config()`` — file-based config loading with defaults.
 2. ``enrich_model()`` — single model enrichment (slug, fallbacks, field mapping).
-3. ``compute_model_infos()`` — multi-model merge and priority sort.
+3. ``compute_model_map()`` — multi-model merge and slug-indexed map.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from primal_codex.config import (
     PrimalCodexConfig,
     ProviderConfig,
-    compute_model_infos,
+    compute_model_map,
     load_config,
 )
 from primal_codex.models import (
@@ -398,17 +398,17 @@ class TestEnrichModel:
         assert info.supported_reasoning_levels[1].effort == ReasoningEffort.high
 
 
-class TestComputeModelInfos:
-    """Tests for ``compute_model_infos()``."""
+class TestComputeModelMap:
+    """Tests for ``compute_model_map()``."""
 
     def test_empty_providers_returns_empty(self) -> None:
-        """Return an empty list when no providers are configured."""
+        """Return an empty dict when no providers are configured."""
         config = PrimalCodexConfig()
-        infos = compute_model_infos(config)
-        assert infos == []
+        model_map = compute_model_map(config)
+        assert model_map == {}
 
     def test_single_provider_single_model(self) -> None:
-        """Yield one ModelInfo for a single provider with one model."""
+        """Yield one entry for a single provider with one model."""
         config = PrimalCodexConfig(
             providers={
                 "crof": ProviderConfig(
@@ -418,10 +418,11 @@ class TestComputeModelInfos:
                 ),
             }
         )
-        infos = compute_model_infos(config)
-        assert len(infos) == 1
-        assert infos[0].slug == "crof/glm-5"
-        assert infos[0].display_name == "GLM-5"
+        model_map = compute_model_map(config)
+        assert len(model_map) == 1
+        info = model_map["crof/glm-5"]
+        assert info.slug == "crof/glm-5"
+        assert info.display_name == "GLM-5"
 
     def test_multiple_providers(self) -> None:
         """Include models from all providers."""
@@ -431,12 +432,11 @@ class TestComputeModelInfos:
                 "b": ProviderConfig(models={"m3": ModelConfig()}),
             }
         )
-        infos = compute_model_infos(config)
-        slugs = {info.slug for info in infos}
-        assert slugs == {"a/m1", "a/m2", "b/m3"}
+        model_map = compute_model_map(config)
+        assert set(model_map) == {"a/m1", "a/m2", "b/m3"}
 
     def test_sorted_by_priority(self) -> None:
-        """Sort models by priority in ascending order."""
+        """Insert models in ascending priority order."""
         config = PrimalCodexConfig(
             providers={
                 "p": ProviderConfig(
@@ -448,8 +448,8 @@ class TestComputeModelInfos:
                 ),
             }
         )
-        infos = compute_model_infos(config)
-        priorities = [info.priority for info in infos]
+        model_map = compute_model_map(config)
+        priorities = [m.priority for m in model_map.values()]
         assert priorities == sorted(priorities)
 
     def test_base_instructions_comes_from_prompt_file(self) -> None:
@@ -461,8 +461,8 @@ class TestComputeModelInfos:
                 ),
             }
         )
-        infos = compute_model_infos(config)
+        model_map = compute_model_map(config)
         prompt = (
             Path(__file__).resolve().parents[1] / "assets" / "prompt.md"
         ).read_text(encoding="utf-8")
-        assert infos[0].base_instructions == prompt
+        assert model_map["p/m"].base_instructions == prompt
