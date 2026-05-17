@@ -57,13 +57,7 @@ class ActiveRelays:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator:
-    """Load config once on startup; drain relays on shutdown."""
-    primal_config = load_config()
-    app.state.ctx = AppContext(
-        primal_config=primal_config,
-        model_infos=compute_model_infos(primal_config),
-        relays=ActiveRelays(),
-    )
+    """Drain active relays on shutdown."""
     yield
     await app.state.ctx.relays.wait_all()
 
@@ -140,7 +134,12 @@ async def responses(
 
 def run_serve() -> None:
     """Start the FastAPI server."""
-    primal_config = PrimalCodexConfig()
+    primal_config = load_config()
+    app.state.ctx = AppContext(
+        primal_config=primal_config,
+        model_infos=compute_model_infos(primal_config),
+        relays=ActiveRelays(),
+    )
     uvicorn_config = uvicorn.Config(
         app,
         host=primal_config.server.host,
