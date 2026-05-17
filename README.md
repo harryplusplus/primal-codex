@@ -104,3 +104,13 @@ API의 스펙을 확인하고 싶으실 경우, 아래 API를 호출하세요.
 ```bash
 curl <base_url>/openapi.json
 ```
+
+## 개발 환경
+
+- `uv` 패키지 매니저
+- Python 3.11
+- codex 레퍼런스 소스 코드
+```sh
+git submodule update --init --recursive
+```
+- `codex` CLI

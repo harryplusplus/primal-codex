@@ -21,6 +21,8 @@
   - `uv run ruff format <foo.py> <bar.py>`
   - `uv run ruff check --fix <foo.py> <bar.py>`
   - `uv run pyrefly check <foo.py> <bar.py>`
+- Codex 클라이언트의 동작을 확인하려면 `external/codex` 경로에서 소스 코드를 확인하세요.
+- `codex` CLI는 설치되어 있습니다.
 
 ## (TODO) 테스트
 
